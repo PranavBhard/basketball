@@ -1,8 +1,0 @@
-[
-  "player_per_1|none|weighted_MIN_REC|diff",
-  "player_per|season|top3_weighted_MPG|diff",
-  "player_starters_per|season|avg|diff",
-  "player_team_per|season|weighted_MPG|away",
-  "player_team_per|season|weighted_MPG|diff",
-  "player_team_per|season|weighted_MPG|home"
-]

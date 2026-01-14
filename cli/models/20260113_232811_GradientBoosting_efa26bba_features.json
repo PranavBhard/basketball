@@ -1,9 +1,0 @@
-[
-  "inj_min_lost|none|raw|away",
-  "inj_min_lost|none|raw|home",
-  "inj_per|none|top3_sum|away",
-  "inj_per|none|top3_sum|home",
-  "inj_per|none|weighted_MIN|diff",
-  "inj_severity|none|raw|away",
-  "inj_severity|none|raw|home"
-]

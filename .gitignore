@@ -26,3 +26,9 @@ __pycache__/
 
 # Logs
 *.log
+
+# Model artifacts and data
+cli/models/
+models/
+reports/
+*.pkl
