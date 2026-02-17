@@ -16,7 +16,7 @@ class TestVegasPredictionFlow:
 
     def test_prediction_context_preloads_vegas_fields(self):
         """Verify PredictionContext._preload_games() includes vegas/pregame_lines in projection."""
-        from nba_app.core.services.prediction import PredictionContext
+        from bball_app.core.services.prediction import PredictionContext
 
         # Mock DB
         mock_db = MagicMock()
@@ -44,7 +44,7 @@ class TestVegasPredictionFlow:
 
     def test_stat_handler_uses_preloaded_vegas_data(self):
         """Verify StatHandlerV2._get_vegas_feature() uses preloaded games_home data."""
-        from nba_app.core.stats.handler import StatHandlerV2
+        from bball_app.core.stats.handler import StatHandlerV2
 
         # Create handler with preloaded games data containing vegas
         handler = StatHandlerV2(statistics=[], db=None, league=None)
@@ -86,7 +86,7 @@ class TestVegasPredictionFlow:
 
     def test_stat_handler_falls_back_to_pregame_lines(self):
         """Verify fallback to pregame_lines when vegas field is missing."""
-        from nba_app.core.stats.handler import StatHandlerV2
+        from bball_app.core.stats.handler import StatHandlerV2
 
         handler = StatHandlerV2(statistics=[], db=None, league=None)
         handler.games_home = {
@@ -123,7 +123,7 @@ class TestVegasPredictionFlow:
 
     def test_vegas_implied_prob_calculation(self):
         """Verify vegas_implied_prob formula: if ML<0: -ML/(-ML+100), else: 100/(ML+100)."""
-        from nba_app.core.stats.handler import StatHandlerV2
+        from bball_app.core.stats.handler import StatHandlerV2
 
         handler = StatHandlerV2(statistics=[], db=None, league=None)
         handler.games_home = {
@@ -151,7 +151,7 @@ class TestVegasPredictionFlow:
 
     def test_missing_vegas_returns_zero(self):
         """Verify that missing vegas data returns 0.0 gracefully."""
-        from nba_app.core.stats.handler import StatHandlerV2
+        from bball_app.core.stats.handler import StatHandlerV2
 
         handler = StatHandlerV2(statistics=[], db=None, league=None)
         handler.games_home = {

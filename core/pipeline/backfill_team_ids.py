@@ -6,9 +6,9 @@ Adds team_id and opponent_id fields to player_stats records based on
 team abbreviation mappings from the teams collection.
 
 Usage:
-    python -m nba_app.core.pipeline.backfill_team_ids cbb
-    python -m nba_app.core.pipeline.backfill_team_ids cbb --dry-run
-    python -m nba_app.core.pipeline.backfill_team_ids cbb --batch-size 10000
+    python -m bball_app.core.pipeline.backfill_team_ids cbb
+    python -m bball_app.core.pipeline.backfill_team_ids cbb --dry-run
+    python -m bball_app.core.pipeline.backfill_team_ids cbb --batch-size 10000
 """
 
 import argparse
@@ -24,8 +24,8 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.league_config import load_league_config, get_available_leagues
-from nba_app.core.mongo import Mongo
+from bball_app.core.league_config import load_league_config, get_available_leagues
+from bball_app.core.mongo import Mongo
 
 
 def build_team_abbrev_to_id_map(db, league_config) -> Dict[str, str]:

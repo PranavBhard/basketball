@@ -12,24 +12,25 @@ Improvements over StatHandler:
 - Era normalization support
 """
 
+import bisect
 import math
 import numpy as np
 from datetime import date, datetime, timedelta
 from collections import defaultdict
-from nba_app.core.utils.collection import import_collection
-from nba_app.core.utils.db_queries import (
+from bball_app.core.utils.collection import import_collection
+from bball_app.core.utils.db_queries import (
     getTeamSeasonGamesFromDate,
     getTeamLastNMonthsSeasonGames,
     getTeamLastNDaysSeasonGames
 )
-from nba_app.core.mongo import Mongo
-from nba_app.core.features.parser import parse_feature_name
-from nba_app.core.features.registry import FeatureRegistry
-from nba_app.core.data import (
+from bball_app.core.mongo import Mongo
+from bball_app.core.features.parser import parse_feature_name
+from bball_app.core.features.registry import FeatureRegistry
+from bball_app.core.data import (
     GamesRepository, PlayerStatsRepository, PlayersRepository,
     RostersRepository
 )
-from nba_app.core.league_config import LeagueConfig, load_league_config
+from bball_app.core.league_config import LeagueConfig, load_league_config
 
 
 class StatHandlerV2:
@@ -103,11 +104,19 @@ class StatHandlerV2:
         # Cache for H2H games to avoid repeated DB queries
         self._h2h_games_cache = {}  # dict[(team1, team2, date_str, n_games)] -> list of games
 
+        # Cache for time-period (days_N / months_N) lookups
+        self._team_time_period_cache = {}  # dict[(team, season, date_str, period_key)] -> list of games
+
+        # Team-indexed structures for O(log N) bisect lookups (built after games load)
+        self._team_games_index = {}  # {season: {team: [(date_str, game_doc), ...]}}
+        self._team_dates_index = {}  # {season: {team: [date_str, ...]}}
+
         # Load all games into memory (or use preloaded data, or skip for lazy loading)
         if preloaded_games is not None:
             self.all_games = preloaded_games
             self.games_home = self.all_games[0]
             self.games_away = self.all_games[1]
+            self._build_team_index()
         elif lazy_load:
             # Don't load all games upfront - will query on-demand
             self.all_games = None
@@ -119,11 +128,87 @@ class StatHandlerV2:
             self.all_games = import_collection(games_collection)
             self.games_home = self.all_games[0]
             self.games_away = self.all_games[1]
+            self._build_team_index()
 
     @property
     def _exclude_game_types(self) -> list:
         """Get excluded game types from league config, with fallback."""
         return self.league.exclude_game_types if self.league else ['preseason', 'allstar']
+
+    def _build_team_index(self):
+        """
+        Build secondary index: {season: {team: [(date_str, game_doc), ...]}}
+        sorted by date_str for O(log N) bisect lookups.
+
+        Iterates games_home once — each game appears once keyed by home team,
+        so we append to both home and away team lists.
+        """
+        team_index = {}   # {season: {team: [(date_str, game_doc), ...]}}
+        dates_index = {}  # {season: {team: [date_str, ...]}}
+
+        for season, date_dict in self.games_home.items():
+            season_teams = team_index.setdefault(season, defaultdict(list))
+            for date_str, teams_dict in date_dict.items():
+                for home_team, game in teams_dict.items():
+                    # Append to home team's list
+                    season_teams[home_team].append((date_str, game))
+                    # Append to away team's list
+                    away_team = game.get('awayTeam', {}).get('name')
+                    if away_team:
+                        season_teams[away_team].append((date_str, game))
+
+        # Sort each team's list by date_str (YYYY-MM-DD sorts lexicographically)
+        # and build parallel dates-only list for bisect
+        for season, teams in team_index.items():
+            dates_index[season] = {}
+            for team, pairs in teams.items():
+                pairs.sort(key=lambda p: p[0])
+                dates_index[season][team] = [p[0] for p in pairs]
+
+        self._team_games_index = team_index
+        self._team_dates_index = dates_index
+
+    def _get_team_games_in_range(
+        self, team: str, season: str,
+        begin_date_str: str = None, end_date_str: str = None,
+        exclude_game_types: list = None
+    ) -> list:
+        """
+        Fast O(log G) lookup of a team's games in [begin_date_str, end_date_str).
+
+        Uses bisect on the pre-sorted _team_dates_index.
+
+        Args:
+            team: Team name
+            season: Season string
+            begin_date_str: Inclusive start date (YYYY-MM-DD). None = from beginning.
+            end_date_str: Exclusive end date (YYYY-MM-DD). None = to end.
+            exclude_game_types: Game types to filter out. None = use self._exclude_game_types.
+
+        Returns:
+            List of game docs sorted by date.
+        """
+        dates = self._team_dates_index.get(season, {}).get(team)
+        if not dates:
+            return []
+
+        pairs = self._team_games_index[season][team]
+
+        # Compute slice bounds via bisect
+        lo = bisect.bisect_left(dates, begin_date_str) if begin_date_str else 0
+        hi = bisect.bisect_left(dates, end_date_str) if end_date_str else len(dates)
+
+        if exclude_game_types is None:
+            exclude_game_types = self._exclude_game_types
+
+        if not exclude_game_types:
+            return [pair[1] for pair in pairs[lo:hi]]
+
+        exclude_set = set(exclude_game_types)
+        return [
+            game for _, game in pairs[lo:hi]
+            if game.get('game_type', 'regseason') not in exclude_set
+        ]
 
     def avg(self, ls: list) -> float:
         """Simple average."""
@@ -142,7 +227,8 @@ class StatHandlerV2:
         if self.db is None:
             return
         
-        venues = list(self.db.nba_venues.find(
+        venues_coll = self.league.collections.get("venues", "nba_venues")
+        venues = list(self.db[venues_coll].find(
             {},
             {'venue_guid': 1, 'location.lat': 1, 'location.lon': 1, 'location.long': 1}
         ))
@@ -390,7 +476,8 @@ class StatHandlerV2:
             return None, None
         
         # Query database (fallback if not preloaded)
-        venue = self.db.nba_venues.find_one(
+        venues_coll = self.league.collections.get("venues", "nba_venues")
+        venue = self.db[venues_coll].find_one(
             {'venue_guid': venue_guid},
             {'location.lat': 1, 'location.lon': 1, 'location.long': 1}
         )
@@ -436,34 +523,10 @@ class StatHandlerV2:
             all_team_games = self._get_team_games_last_n_days(team, year, month, day, season, n_days)
             games = [g for g in all_team_games if g.get('game_type', 'regseason') not in self._exclude_game_types]
         else:
-            # Use preloaded data structure
-            games = []
-            if season in self.games_home:
-                for date_str, teams_dict in self.games_home[season].items():
-                    game_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if game_date < start_date or game_date >= target_date:
-                        continue
-                    
-                    for team_name, game in teams_dict.items():
-                        if team_name == team:
-                            game_type = game.get('game_type', 'regseason')
-                            if game_type not in self._exclude_game_types:
-                                games.append(game)
-
-            if season in self.games_away:
-                for date_str, teams_dict in self.games_away[season].items():
-                    game_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if game_date < start_date or game_date >= target_date:
-                        continue
-
-                    for team_name, game in teams_dict.items():
-                        if team_name == team:
-                            game_type = game.get('game_type', 'regseason')
-                            if game_type not in self._exclude_game_types:
-                                games.append(game)
-            
-            # Sort by date
-            games.sort(key=lambda g: g.get('date', ''))
+            # Use team index for O(log N) bisect lookup
+            begin_str = start_date.strftime('%Y-%m-%d')
+            end_str = f"{year}-{month:02d}-{day:02d}"
+            games = self._get_team_games_in_range(team, season, begin_date_str=begin_str, end_date_str=end_str)
         
         if not games:
             logger.debug(f"[TRAVEL] No games for {team} in last {n_days} days before {year}-{month:02d}-{day:02d} ({season})")
@@ -666,38 +729,13 @@ class StatHandlerV2:
                 if 'homeTeam' in game and 'awayTeam' in game and 'date' in game:
                     games.append(game)
         else:
-            # Use preloaded data structure
-            if season in self.games_home:
-                for date_str, teams_dict in self.games_home[season].items():
-                    game_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if game_date >= target_date:
-                        continue
-                    
-                    for team_name, game in teams_dict.items():
-                        if team_name == team:
-                            game_type = game.get('game_type', 'regseason')
-                            if game_type not in self._exclude_game_types and game.get('season') == season:
-                                games.append(game)
+            # Use team index for O(log N) bisect lookup
+            games = self._get_team_games_in_range(team, season, end_date_str=date_str)
 
-            if season in self.games_away:
-                for date_str, teams_dict in self.games_away[season].items():
-                    game_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if game_date >= target_date:
-                        continue
-
-                    for team_name, game in teams_dict.items():
-                        if team_name == team:
-                            game_type = game.get('game_type', 'regseason')
-                            if game_type not in self._exclude_game_types and game.get('season') == season:
-                                games.append(game)
-        
-        # Sort by date
-        games.sort(key=lambda g: g['date'])
-        
         # Cache the result
         self._team_games_cache[cache_key] = games
         return games
-    
+
     def _get_team_games_last_n_months(self, team: str, year: int, month: int, day: int, season: str, n_months: int) -> list:
         """
         Get team games in the last N months (for lazy loading compatibility).
@@ -730,26 +768,32 @@ class StatHandlerV2:
                 game['_id'] = str(game['_id'])
             return games
         else:
-            # Use preloaded data via existing function
-            from nba_app.core.utils.db_queries import getTeamLastNMonthsSeasonGames
-            return getTeamLastNMonthsSeasonGames(team, year, month, day, season, n_months, self.all_games)
-    
+            # Use team index for O(log N) bisect lookup with caching
+            from dateutil import relativedelta as rd
+            end_str = f"{year}-{month:02d}-{day:02d}"
+            begin_dt = date(year, month, day) - rd.relativedelta(months=n_months)
+            begin_str = begin_dt.strftime('%Y-%m-%d')
+            cache_key = (team, season, end_str, f'months_{n_months}')
+            if cache_key in self._team_time_period_cache:
+                return self._team_time_period_cache[cache_key]
+            games = self._get_team_games_in_range(team, season, begin_date_str=begin_str, end_date_str=end_str)
+            self._team_time_period_cache[cache_key] = games
+            return games
+
     def _get_team_games_last_n_days(self, team: str, year: int, month: int, day: int, season: str, n_days: int) -> list:
         """
         Get team games in the last N days (for lazy loading compatibility).
-        
+
         Returns list of games sorted by date.
         """
         if self.games_home is None or self.games_away is None:
             # Query from DB
             if self.db is None:
                 raise ValueError("DB connection required for lazy loading.")
-            
-            from datetime import timedelta
-            from datetime import datetime as dt
-            target_date = dt(year, month, day).date()
+
+            target_date = date(year, month, day)
             begin_date = target_date - timedelta(days=n_days)
-            
+
             query = {
                 'season': season,
                 'date': {'$gte': begin_date.strftime('%Y-%m-%d'), '$lt': target_date.strftime('%Y-%m-%d')},
@@ -759,16 +803,23 @@ class StatHandlerV2:
                     {'awayTeam.name': team}
                 ]
             }
-            
+
             # Query all fields - we need stat fields from homeTeam/awayTeam
             games = self._games_repo.find(query, sort=[('date', 1)])
             for game in games:
                 game['_id'] = str(game['_id'])
             return games
         else:
-            # Use preloaded data via existing function
-            from nba_app.core.utils.db_queries import getTeamLastNDaysSeasonGames
-            return getTeamLastNDaysSeasonGames(team, year, month, day, season, n_days, self.all_games)
+            # Use team index for O(log N) bisect lookup with caching
+            end_str = f"{year}-{month:02d}-{day:02d}"
+            begin_dt = date(year, month, day) - timedelta(days=n_days)
+            begin_str = begin_dt.strftime('%Y-%m-%d')
+            cache_key = (team, season, end_str, f'days_{n_days}')
+            if cache_key in self._team_time_period_cache:
+                return self._team_time_period_cache[cache_key]
+            games = self._get_team_games_in_range(team, season, begin_date_str=begin_str, end_date_str=end_str)
+            self._team_time_period_cache[cache_key] = games
+            return games
     
     def get_schedule_context(self, team: str, year: int, month: int, day: int, season: str) -> dict:
         """
@@ -986,6 +1037,20 @@ class StatHandlerV2:
                 return assists / to
             return None
         
+        elif stat_name == 'three_rate':
+            three_att = team_data.get('three_att', 0)
+            fg_att = team_data.get('FG_att', 0)
+            if fg_att > 0:
+                return float(three_att) / float(fg_att)
+            return None
+
+        elif stat_name == 'ft_rate':
+            ft_att = team_data.get('FT_att', 0)
+            fg_att = team_data.get('FG_att', 0)
+            if fg_att > 0:
+                return float(ft_att) / float(fg_att)
+            return None
+
         elif stat_name == 'opp_effective_fg_perc' and game is not None:
             # Compute opponent eFG% from opponent raw stats for this single game
             team_name = team_data.get('name')
@@ -1698,18 +1763,17 @@ class StatHandlerV2:
         # Handle PER features
         if stat_name.startswith('player_'):
             return self._calculate_per_feature(feature_name, home_team, away_team, season, year, month, day, per_calculator)
-        
-        # Handle blend features (stat_name ends with '_blend')
-        is_blend = stat_name.endswith('_blend')
-        if is_blend:
-            base_stat_name = stat_name[:-6]  # Remove '_blend'
-            return self._calculate_blend_feature(
-                base_stat_name, time_period, calc_weight, perspective, is_side,
-                home_team, away_team, season, year, month, day
+
+        # Handle composite time periods (blend, delta, blend-delta)
+        if time_period.startswith('blend:') or time_period.startswith('delta:'):
+            return self._calculate_composite_time_period_feature(
+                stat_name, time_period, calc_weight, perspective, is_side,
+                home_team, away_team, season, year, month, day, per_calculator
             )
-        
+
         # Shot-mix attempt rates (explicitly defined as ratio-of-totals with location splits)
-        if stat_name in ['three_rate', 'ft_rate']:
+        # For std, fall through to the generic path to get per-game values
+        if stat_name in ['three_rate', 'ft_rate'] and calc_weight != 'std':
             return self._calculate_attempt_rate_feature(
                 stat_name, time_period, perspective, home_team, away_team, season, year, month, day
             )
@@ -1742,17 +1806,43 @@ class StatHandlerV2:
                 time_period, is_side, home_team, away_team, season, year, month, day
             )
 
+        # Conference win percentage (league-specific: requires conference field on teams)
+        if stat_name == 'conf_wins':
+            return self._calculate_conf_wins_feature(
+                time_period, calc_weight, perspective,
+                home_team, away_team, season, year, month, day
+            )
+
+        # Same conference binary (league-specific)
+        if stat_name == 'same_conf':
+            home_conf = self._get_team_conference(home_team)
+            away_conf = self._get_team_conference(away_team)
+            return 1.0 if (home_conf and away_conf and home_conf == away_conf) else 0.0
+
+        # Conference average margin (league-specific)
+        if stat_name == 'conf_margin':
+            return self._calculate_conf_margin_feature(
+                perspective, home_team, away_team, season, year, month, day
+            )
+
+        # Conference games played count (league-specific)
+        if stat_name == 'conf_gp':
+            return self._calculate_conf_gp_feature(
+                perspective, home_team, away_team, season, year, month, day
+            )
+
+        # Postseason binary indicator
+        if stat_name == 'postseason':
+            return self._calculate_postseason_feature(home_team, away_team, year, month, day)
+
         # Close game win percentage
         if stat_name == 'close_win_pct':
             return self._calculate_close_win_pct_feature(
                 time_period, perspective, home_team, away_team, season, year, month, day
             )
 
-        # Handle enhanced features (pace, travel, b2b, first_of_b2b, games_played, days_rest, points with std)
-        if stat_name in ['pace', 'travel', 'b2b', 'first_of_b2b', 'games_played', 'days_rest']:
-            return self._calculate_enhanced_feature(feature_name, home_team, away_team, season, year, month, day, target_venue_guid)
-        elif stat_name == 'points' and components.calc_weight == 'std':
-            # Points standard deviation (volatility) - special enhanced feature
+        # Handle enhanced features (pace, travel, b2b, first_of_b2b, games_played, road_games, days_rest)
+        if stat_name in ['pace', 'travel', 'b2b', 'first_of_b2b', 'games_played', 'road_games', 'days_rest']:
             return self._calculate_enhanced_feature(feature_name, home_team, away_team, season, year, month, day, target_venue_guid)
         
         # Handle net features (stat_name ends with '_net')
@@ -1790,7 +1880,7 @@ class StatHandlerV2:
         Args:
             stat_name: Base stat name (e.g., 'points', 'efg', 'off_rtg')
             time_period: Time period (e.g., 'season', 'months_1', 'games_10', 'h2h_last10')
-            calc_weight: Calculation method ('raw' or 'avg')
+            calc_weight: Calculation method ('raw', 'avg', or 'std')
             perspective: 'home', 'away', or 'diff'
             is_side: Whether this is a side-split feature
             home_team, away_team, season, year, month, day: Game context
@@ -1877,7 +1967,7 @@ class StatHandlerV2:
             stat_name: Stat name (e.g., 'points', 'efg', 'off_rtg')
             team: Team name
             games: List of game documents
-            calc_weight: 'raw' or 'avg'
+            calc_weight: 'raw', 'avg', or 'std'
             reference_date: Reference date for weighted averages
             
         Returns:
@@ -1903,7 +1993,7 @@ class StatHandlerV2:
             else:  # 'avg' - wins per game (win percentage)
                 return float(wins) / len(games) if games else 0.0
         
-        # Determine if this is a rate stat using FeatureRegistry (SSoT)
+        # Determine if this is a rate/derived stat that needs per-game computation
         # Check by canonical name, not internal/DB name
         is_rate_stat = stat_name in FeatureRegistry.get_rate_stats()
         # Also check opponent stats which require aggregation
@@ -1911,7 +2001,9 @@ class StatHandlerV2:
             'opp_effective_fg_perc', 'opp_true_shooting_perc', 'opp_three_perc',
             'opp_assists_ratio', 'opp_points'
         }
-        is_rate_stat = is_rate_stat or internal_stat_name in opponent_stats
+        # Derived stats that have per-game compute handlers in _compute_derived_stat
+        per_game_derived_stats = {'three_rate', 'ft_rate'}
+        is_rate_stat = is_rate_stat or internal_stat_name in opponent_stats or stat_name in per_game_derived_stats
         
         # Calculate based on calc_weight
         if calc_weight == 'raw':
@@ -1932,9 +2024,9 @@ class StatHandlerV2:
                     if value is not None:
                         total += value
                 return total
-        else:  # calc_weight == 'avg'
+        else:  # calc_weight in ('avg', 'std')
             if is_rate_stat:
-                # For rate stats with 'avg', calculate per-game then average
+                # For rate stats with 'avg'/'std', calculate per-game then aggregate
                 # BUT: Some rate stats (off_rtg, def_rtg, assists_ratio) require aggregation
                 # and cannot be calculated per-game. For these, we aggregate first then calculate.
                 # Opponent stats also require aggregation since they need team_against_agg.
@@ -1944,11 +2036,14 @@ class StatHandlerV2:
                     'opp_assists_ratio', 'opp_points'
                 }
                 if internal_stat_name in aggregation_required_stats:
+                    if calc_weight == 'std':
+                        # No per-game values available for aggregation-required stats
+                        return 0.0
                     # These stats require aggregation - calculate from aggregate
                     computed = self._compute_derived_stat_from_aggregate(internal_stat_name, games, team)
                     return computed if computed is not None else 0.0
-                
-                # For other rate stats, calculate per-game then average
+
+                # For other rate stats, calculate per-game then avg/std
                 values = []
                 dates = []
                 for game in games:
@@ -1963,13 +2058,15 @@ class StatHandlerV2:
                         values.append(computed)
                         dates.append(game['date'])
                 if values:
+                    if calc_weight == 'std':
+                        return self.std(values)
                     if self.use_exponential_weighting:
                         return self.weighted_avg(values, dates, reference_date)
                     else:
                         return self.avg(values)
                 return 0.0
             else:
-                # For basic stats with 'avg', average per-game values
+                # For basic stats with 'avg'/'std', extract per-game values then aggregate
                 values = []
                 dates = []
                 for game in games:
@@ -1984,6 +2081,8 @@ class StatHandlerV2:
                         values.append(value)
                         dates.append(game['date'])
                 if values:
+                    if calc_weight == 'std':
+                        return self.std(values)
                     if self.use_exponential_weighting:
                         return self.weighted_avg(values, dates, reference_date)
                     else:
@@ -2135,9 +2234,9 @@ class StatHandlerV2:
         else:  # 'diff'
             return home_net - away_net
     
-    def _calculate_blend_feature(
+    def _calculate_composite_time_period_feature(
         self,
-        base_stat_name: str,
+        stat_name: str,
         time_period: str,
         calc_weight: str,
         perspective: str,
@@ -2147,106 +2246,112 @@ class StatHandlerV2:
         season: str,
         year: int,
         month: int,
-        day: int
+        day: int,
+        per_calculator=None
     ) -> float:
         """
-        Calculate a blend feature (weighted combination of multiple time periods).
+        Calculate a feature with a composite time period (blend, delta, or blend-delta).
 
-        Format: blend:season:0.75/games_12:0.25
+        Dispatches to _compute_blend for blend time periods, or recursively
+        calls calculate_feature for delta components.
 
         Args:
-            base_stat_name: Base stat name without '_blend' (e.g., 'points_net', 'off_rtg_net', 'efg_net', 'wins')
-            time_period: Time period string (e.g., 'blend:season:0.75/games_12:0.25')
-            calc_weight: Calculation weight ('avg', 'raw', etc.)
-            perspective: 'home', 'away', or 'diff'
-            is_side: Whether this is a side-split feature
+            stat_name: Stat name (e.g., 'margin', 'wins', 'efg_net')
+            time_period: Composite time period (e.g., 'blend:games_5:0.70/games_10:0.30',
+                        'delta:games_5-season', 'delta:blend:games_5:0.70/games_10:0.30-season')
+            calc_weight, perspective, is_side: Feature components
             home_team, away_team, season, year, month, day: Game context
+            per_calculator: Optional PERCalculator instance
 
         Returns:
-            Blend feature value
+            Feature value (float)
         """
-        # Parse blend components
-        # The blend specification can be in either time_period OR calc_weight field
-        # depending on feature naming convention:
-        #   - Old: stat_blend|blend:season:0.75/games_12:0.25|avg|diff
-        #   - New: stat_blend|none|blend:season:0.75/games_12:0.25|diff
-        blend_components = {}
+        if time_period.startswith('blend:') and not time_period.startswith('delta:'):
+            # Pure blend: weighted combination of time periods
+            parsed = FeatureRegistry.parse_blend_time_period(time_period)
+            if parsed is None:
+                return 0.0
+            return self._compute_blend(
+                stat_name, parsed['components'], calc_weight, perspective, is_side,
+                home_team, away_team, season, year, month, day, per_calculator
+            )
 
-        # Determine which field contains the blend spec
-        if calc_weight and calc_weight.startswith('blend:'):
-            blend_source = calc_weight
-        elif time_period and time_period.startswith('blend:'):
-            blend_source = time_period
-        else:
-            print(f"Warning: Invalid blend format. Neither time_period='{time_period}' nor calc_weight='{calc_weight}' starts with 'blend:'. Returning 0.0")
+        if time_period.startswith('delta:'):
+            # Delta or blend-delta
+            parsed = FeatureRegistry.parse_delta_time_period(time_period)
+            if parsed is None:
+                return 0.0
+
+            side_suffix = '|side' if is_side else ''
+
+            if parsed['type'] == 'blend_delta':
+                # Recent is a blend — reconstruct blend time_period string for recursion
+                recent_tp = 'blend:' + '/'.join(
+                    f"{tp}:{w}" for tp, w in parsed['recent']['components']
+                )
+            else:
+                recent_tp = parsed['recent']
+
+            baseline_tp = parsed['baseline']
+
+            # Recursively calculate recent and baseline features
+            recent_feature = f"{stat_name}|{recent_tp}|{calc_weight}|{perspective}{side_suffix}"
+            baseline_feature = f"{stat_name}|{baseline_tp}|{calc_weight}|{perspective}{side_suffix}"
+
+            recent_value = self.calculate_feature(
+                recent_feature, home_team, away_team, season, year, month, day, per_calculator
+            )
+            baseline_value = self.calculate_feature(
+                baseline_feature, home_team, away_team, season, year, month, day, per_calculator
+            )
+
+            return recent_value - baseline_value
+
+        return 0.0
+
+    def _compute_blend(
+        self,
+        stat_name: str,
+        components: list,
+        calc_weight: str,
+        perspective: str,
+        is_side: bool,
+        home_team: str,
+        away_team: str,
+        season: str,
+        year: int,
+        month: int,
+        day: int,
+        per_calculator=None
+    ) -> float:
+        """
+        Compute a blended value from weighted time period components.
+
+        Args:
+            stat_name: Stat name (e.g., 'margin', 'wins')
+            components: List of (time_period, weight) tuples
+            calc_weight, perspective, is_side: Feature components
+            home_team, away_team, season, year, month, day: Game context
+            per_calculator: Optional PERCalculator instance
+
+        Returns:
+            Weighted blend value
+        """
+        side_suffix = '|side' if is_side else ''
+
+        # Normalize weights if they don't sum to 1.0
+        total_weight = sum(w for _, w in components)
+        if total_weight <= 0:
             return 0.0
 
-        # Format: blend:season:0.75/games_12:0.25
-        blend_spec = blend_source[6:]  # Remove 'blend:' prefix
-        parts = blend_spec.split('/')
-
-        for part in parts:
-            if ':' not in part:
-                continue
-            tp, weight_str = part.split(':', 1)
-            try:
-                weight = float(weight_str)
-                blend_components[tp] = weight
-            except ValueError:
-                continue
-
-        # Validate weights sum to 1.0 (allow small floating point errors)
-        total_weight = sum(blend_components.values())
-        if abs(total_weight - 1.0) > 0.01:
-            # Normalize weights if they don't sum to 1.0
-            if total_weight > 0:
-                blend_components = {k: v / total_weight for k, v in blend_components.items()}
-        
-        if not blend_components:
-            return 0.0
-        
-        # Determine if this is a net feature
-        is_net = base_stat_name.endswith('_net')
-        
-        # Map base_stat_name to the actual stat name for net features
-        if is_net:
-            # For net features, map to the base stat name (without _net)
-            if base_stat_name == 'points_net':
-                net_base_stat = 'points'
-            elif base_stat_name == 'off_rtg_net':
-                net_base_stat = 'off_rtg'
-            elif base_stat_name == 'efg_net':
-                net_base_stat = 'efg'
-            else:
-                net_base_stat = base_stat_name.replace('_net', '')
-        else:
-            net_base_stat = None
-        
-        # Use calc_weight from parameter, or default to 'avg' if not specified
-        if not calc_weight or calc_weight == 'none':
-            # Determine default calc_weight based on base_stat_name
-            if base_stat_name in ['points_net', 'wins']:
-                calc_weight = 'avg'
-            elif base_stat_name in ['off_rtg_net', 'efg_net']:
-                calc_weight = 'raw'
-            else:
-                calc_weight = 'avg'
-        
-        # Calculate weighted blend from all components
         blend_value = 0.0
-        for time_period_component, weight in blend_components.items():
-            if is_net:
-                component_value = self._calculate_net_feature(
-                    net_base_stat, time_period_component, calc_weight, perspective, is_side,
-                    home_team, away_team, season, year, month, day
-                )
-            else:
-                component_value = self._calculate_regular_feature(
-                    base_stat_name, time_period_component, calc_weight, perspective, is_side,
-                    home_team, away_team, season, year, month, day
-                )
-            blend_value += weight * component_value
-        
+        for tp, weight in components:
+            component_feature = f"{stat_name}|{tp}|{calc_weight}|{perspective}{side_suffix}"
+            component_value = self.calculate_feature(
+                component_feature, home_team, away_team, season, year, month, day, per_calculator
+            )
+            blend_value += (weight / total_weight) * component_value
+
         return blend_value
     
     def _calculate_enhanced_feature(
@@ -2304,39 +2409,29 @@ class StatHandlerV2:
             else:  # 'diff'
                 return home_value - away_value
         
-        # Calculate points std (volatility)
-        elif stat_name == 'points' and calc_weight == 'std':
+        # Calculate road_games features (count of away games in period)
+        elif stat_name == 'road_games':
             if time_period == 'season':
                 home_games = self.get_team_games_before_date(home_team, year, month, day, season)
                 away_games = self.get_team_games_before_date(away_team, year, month, day, season)
+            elif time_period.startswith('days_'):
+                n_days = int(time_period.replace('days_', ''))
+                home_games = self._get_team_games_last_n_days(home_team, year, month, day, season, n_days)
+                away_games = self._get_team_games_last_n_days(away_team, year, month, day, season, n_days)
             else:
                 return 0.0
-            
-            # Extract points for each game
-            home_points = []
-            for game in home_games:
-                if game['homeTeam']['name'] == home_team:
-                    home_points.append(game['homeTeam'].get('points', 0))
-                elif game['awayTeam']['name'] == home_team:
-                    home_points.append(game['awayTeam'].get('points', 0))
-            
-            away_points = []
-            for game in away_games:
-                if game['homeTeam']['name'] == away_team:
-                    away_points.append(game['homeTeam'].get('points', 0))
-                elif game['awayTeam']['name'] == away_team:
-                    away_points.append(game['awayTeam'].get('points', 0))
-            
-            home_std = self.std(home_points) if home_points else 0.0
-            away_std = self.std(away_points) if away_points else 0.0
-            
+
+            # Count games where the team was the away team
+            home_value = float(sum(1 for g in home_games if g.get('awayTeam', {}).get('name') == home_team))
+            away_value = float(sum(1 for g in away_games if g.get('awayTeam', {}).get('name') == away_team))
+
             if perspective == 'home':
-                return home_std
+                return home_value
             elif perspective == 'away':
-                return away_std
+                return away_value
             else:  # 'diff'
-                return home_std - away_std
-        
+                return home_value - away_value
+
         # Calculate pace features
         elif stat_name == 'pace':
             # Support season and games_N windows (broadest useful set).
@@ -2963,6 +3058,257 @@ class StatHandlerV2:
         )
         return float(len(h2h_games))
 
+    # -----------------------------------------------------------------
+    # Conference win percentage (league-specific)
+    # -----------------------------------------------------------------
+
+    def _calculate_conf_wins_feature(
+        self,
+        time_period: str,
+        calc_weight: str,
+        perspective: str,
+        home_team: str,
+        away_team: str,
+        season: str,
+        year: int,
+        month: int,
+        day: int,
+    ) -> float:
+        """Conference win percentage: wins vs same-conference opponents / total conf games."""
+        home_pct = self._get_conference_win_pct(home_team, season, year, month, day)
+        away_pct = self._get_conference_win_pct(away_team, season, year, month, day)
+
+        if perspective == 'home':
+            return home_pct
+        elif perspective == 'away':
+            return away_pct
+        else:  # diff
+            return home_pct - away_pct
+
+    def _get_conference_win_pct(self, team: str, season: str, year: int, month: int, day: int) -> float:
+        """Get a team's conference win percentage up to (not including) the given date."""
+        conference = self._get_team_conference(team)
+        if not conference:
+            return 0.5  # Neutral default if no conference data
+
+        conf_teams = self._get_conference_teams(conference)
+
+        games = self._get_games_for_time_period(team, season, year, month, day, 'season')
+
+        conf_wins = 0
+        conf_games = 0
+        for game in games:
+            game_home = game.get('homeTeam', {}).get('name', '')
+            game_away = game.get('awayTeam', {}).get('name', '')
+
+            # Also check team_id for CBB which uses id-based matching
+            game_home_id = str(game.get('homeTeam', {}).get('team_id', ''))
+            game_away_id = str(game.get('awayTeam', {}).get('team_id', ''))
+
+            # Determine if this team is home or away in this game
+            is_home = (game_home == team or game_home_id == team)
+
+            # Determine opponent identifiers
+            if is_home:
+                opp_name = game_away
+                opp_id = game_away_id
+            else:
+                opp_name = game_home
+                opp_id = game_home_id
+
+            # Check if opponent is in same conference
+            if opp_name not in conf_teams and opp_id not in conf_teams:
+                continue
+
+            conf_games += 1
+            home_pts = game.get('homeTeam', {}).get('points', 0) or 0
+            away_pts = game.get('awayTeam', {}).get('points', 0) or 0
+            if is_home and home_pts > away_pts:
+                conf_wins += 1
+            elif not is_home and away_pts > home_pts:
+                conf_wins += 1
+
+        if conf_games == 0:
+            return 0.5  # Neutral default
+
+        return conf_wins / conf_games
+
+    def _calculate_conf_margin_feature(
+        self,
+        perspective: str,
+        home_team: str,
+        away_team: str,
+        season: str,
+        year: int,
+        month: int,
+        day: int,
+    ) -> float:
+        """Average margin per game against same-conference opponents this season."""
+        home_margin = self._get_conference_avg_margin(home_team, season, year, month, day)
+        away_margin = self._get_conference_avg_margin(away_team, season, year, month, day)
+
+        if perspective == 'home':
+            return home_margin
+        elif perspective == 'away':
+            return away_margin
+        else:  # diff
+            return home_margin - away_margin
+
+    def _get_conference_avg_margin(self, team: str, season: str, year: int, month: int, day: int) -> float:
+        """Get a team's average margin in conference games up to (not including) the given date."""
+        conference = self._get_team_conference(team)
+        if not conference:
+            return 0.0
+
+        conf_teams = self._get_conference_teams(conference)
+        games = self._get_games_for_time_period(team, season, year, month, day, 'season')
+
+        total_margin = 0.0
+        conf_games = 0
+        for game in games:
+            game_home = game.get('homeTeam', {}).get('name', '')
+            game_away = game.get('awayTeam', {}).get('name', '')
+            game_home_id = str(game.get('homeTeam', {}).get('team_id', ''))
+            game_away_id = str(game.get('awayTeam', {}).get('team_id', ''))
+
+            is_home = (game_home == team or game_home_id == team)
+            if is_home:
+                opp_name = game_away
+                opp_id = game_away_id
+            else:
+                opp_name = game_home
+                opp_id = game_home_id
+
+            if opp_name not in conf_teams and opp_id not in conf_teams:
+                continue
+
+            conf_games += 1
+            home_pts = game.get('homeTeam', {}).get('points', 0) or 0
+            away_pts = game.get('awayTeam', {}).get('points', 0) or 0
+            if is_home:
+                total_margin += (home_pts - away_pts)
+            else:
+                total_margin += (away_pts - home_pts)
+
+        if conf_games == 0:
+            return 0.0
+
+        return total_margin / conf_games
+
+    def _get_team_conference(self, team: str):
+        """Look up a team's conference from teams collection. Cached per session."""
+        if not hasattr(self, '_conference_cache'):
+            self._conference_cache = {}
+        if team in self._conference_cache:
+            return self._conference_cache[team]
+
+        if self.db is None:
+            return None
+
+        teams_coll = self.league.collections.get("teams", "cbb_teams")
+        team_doc = self.db[teams_coll].find_one(
+            {'$or': [{'abbreviation': team}, {'team_id': team}]},
+            {'conference': 1}
+        )
+        conference = team_doc.get('conference') if team_doc else None
+        self._conference_cache[team] = conference
+        return conference
+
+    def _get_conference_teams(self, conference: str) -> set:
+        """Get all team names/ids in a conference. Cached per session."""
+        if not hasattr(self, '_conf_teams_cache'):
+            self._conf_teams_cache = {}
+        if conference in self._conf_teams_cache:
+            return self._conf_teams_cache[conference]
+
+        if self.db is None:
+            return set()
+
+        teams_coll = self.league.collections.get("teams", "cbb_teams")
+        docs = self.db[teams_coll].find(
+            {'conference': conference},
+            {'abbreviation': 1, 'team_id': 1}
+        )
+        names = set()
+        for d in docs:
+            if d.get('abbreviation'):
+                names.add(d['abbreviation'])
+            if d.get('team_id'):
+                names.add(str(d['team_id']))
+        self._conf_teams_cache[conference] = names
+        return names
+
+    def _calculate_conf_gp_feature(
+        self,
+        perspective: str,
+        home_team: str,
+        away_team: str,
+        season: str,
+        year: int,
+        month: int,
+        day: int,
+    ) -> float:
+        """Conference games played count for each team this season."""
+        home_gp = self._get_conference_games_played(home_team, season, year, month, day)
+        away_gp = self._get_conference_games_played(away_team, season, year, month, day)
+
+        if perspective == 'home':
+            return float(home_gp)
+        elif perspective == 'away':
+            return float(away_gp)
+        else:  # diff
+            return float(home_gp - away_gp)
+
+    def _get_conference_games_played(self, team: str, season: str, year: int, month: int, day: int) -> int:
+        """Count conference games a team has played this season before the given date."""
+        conference = self._get_team_conference(team)
+        if not conference:
+            return 0
+
+        conf_teams = self._get_conference_teams(conference)
+        games = self._get_games_for_time_period(team, season, year, month, day, 'season')
+
+        conf_games = 0
+        for game in games:
+            game_home = game.get('homeTeam', {}).get('name', '')
+            game_away = game.get('awayTeam', {}).get('name', '')
+            game_home_id = str(game.get('homeTeam', {}).get('team_id', ''))
+            game_away_id = str(game.get('awayTeam', {}).get('team_id', ''))
+
+            is_home = (game_home == team or game_home_id == team)
+            if is_home:
+                opp_name, opp_id = game_away, game_away_id
+            else:
+                opp_name, opp_id = game_home, game_home_id
+
+            if opp_name in conf_teams or opp_id in conf_teams:
+                conf_games += 1
+
+        return conf_games
+
+    def _calculate_postseason_feature(self, home_team: str, away_team: str,
+                                       year: int, month: int, day: int) -> float:
+        """Binary: 1 if this game is postseason/playoffs, 0 otherwise."""
+        if not hasattr(self, '_game_type_cache'):
+            self._game_type_cache = {}
+
+        date_str = f"{year}-{month:02d}-{day:02d}"
+        cache_key = (home_team, away_team, date_str)
+        if cache_key in self._game_type_cache:
+            game_type = self._game_type_cache[cache_key]
+        elif self.db is not None:
+            games_coll = self.league.collections.get("games", "nba_games")
+            doc = self.db[games_coll].find_one(
+                {'date': date_str, 'homeTeam.name': home_team, 'awayTeam.name': away_team},
+                {'game_type': 1}
+            )
+            game_type = doc.get('game_type') if doc else None
+            self._game_type_cache[cache_key] = game_type
+        else:
+            game_type = None
+
+        return 1.0 if game_type in ('postseason', 'playoffs') else 0.0
+
     def _calculate_margin_h2h_feature(
         self,
         time_period: str,
@@ -3328,7 +3674,7 @@ class StatHandlerV2:
             return 0.0
 
         try:
-            from nba_app.core.stats.elo_cache import EloCache
+            from bball_app.core.stats.elo_cache import EloCache
 
             # Lazy-initialize elo cache
             if not hasattr(self, '_elo_cache'):
@@ -3706,8 +4052,13 @@ class StatHandlerV2:
                     home_roster_doc = self._rosters_repo.find_roster(HOME, season)
                     if home_roster_doc:
                         home_roster = home_roster_doc.get('roster', [])
-                        # Build a map of player_id -> injured status
-                        home_roster_map = {str(entry.get('player_id')): entry.get('injured', False) for entry in home_roster}
+                        # Build a map of player_id -> injured status (excluding disabled players)
+                        # Disabled players are excluded entirely, matching build_player_lists_for_prediction behavior
+                        home_roster_map = {
+                            str(entry.get('player_id')): entry.get('injured', False)
+                            for entry in home_roster
+                            if not entry.get('disabled', False)
+                        }
                         # If we have a concrete player list for this game, restrict to it.
                         # Otherwise (common for future games), use the roster's injured flags directly.
                         if home_player_ids:
@@ -3719,8 +4070,13 @@ class StatHandlerV2:
                     away_roster_doc = self._rosters_repo.find_roster(AWAY, season)
                     if away_roster_doc:
                         away_roster = away_roster_doc.get('roster', [])
-                        # Build a map of player_id -> injured status
-                        away_roster_map = {str(entry.get('player_id')): entry.get('injured', False) for entry in away_roster}
+                        # Build a map of player_id -> injured status (excluding disabled players)
+                        # Disabled players are excluded entirely, matching build_player_lists_for_prediction behavior
+                        away_roster_map = {
+                            str(entry.get('player_id')): entry.get('injured', False)
+                            for entry in away_roster
+                            if not entry.get('disabled', False)
+                        }
                         # If we have a concrete player list for this game, restrict to it.
                         # Otherwise (common for future games), use the roster's injured flags directly.
                         if away_player_ids:
@@ -4730,26 +5086,10 @@ class StatHandlerV2:
         prior_games = []
 
         if self.games_home is not None and self.games_away is not None:
-            # Use preloaded data structure (no DB calls!)
-            if season in self.games_home:
-                for date_str, teams_dict in self.games_home[season].items():
-                    if date_str >= before_date:
-                        continue
-                    if team in teams_dict:
-                        game = teams_dict[team]
-                        # Only include completed games
-                        if game.get('homeWon') is not None:
-                            prior_games.append(game)
-
-            if season in self.games_away:
-                for date_str, teams_dict in self.games_away[season].items():
-                    if date_str >= before_date:
-                        continue
-                    if team in teams_dict:
-                        game = teams_dict[team]
-                        # Only include completed games
-                        if game.get('homeWon') is not None:
-                            prior_games.append(game)
+            # Use team index for O(log N) bisect lookup (no DB calls!)
+            # Pass empty exclude list — injury severity needs all game types, then filter completed
+            all_games = self._get_team_games_in_range(team, season, end_date_str=before_date, exclude_game_types=[])
+            prior_games = [g for g in all_games if g.get('homeWon') is not None]
         else:
             # Fallback to DB query - TRACK THIS!
             if not hasattr(self, '_db_fallback_season_severity'):

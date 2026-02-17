@@ -14,7 +14,7 @@ This module provides functions to:
 from typing import Dict, Optional, Tuple, List
 import re
 
-from nba_app.core.features.registry import FeatureRegistry
+from bball_app.core.features.registry import FeatureRegistry
 
 
 class FeatureNameComponents:

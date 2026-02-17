@@ -6,12 +6,12 @@ This codebase uses a **strict layered architecture**. Violating these principles
 
 ### The `core/` Layer is the Single Source of Truth (SSoT)
 
-All core functionality lives in `nba_app/core/`:
-- **Feature registry, calculations, and generation** (`feature_registry.py`, `feature_generator.py`, `per_calculator.py`, etc.)
-- **Training data generation**
-- **Model training and prediction workflows** (`nba_model.py`, `points_regression.py`, etc.)
-- **Database access** (`mongo.py`, `db_query_funcs.py`)
-- **Shared utilities** (`stat_handler.py`, `player_utils.py`, `feature_sets.py`, etc.)
+All core functionality lives in `bball_app/core/`:
+- **Feature registry, calculations, and generation** (`core/features/`)
+- **Training infrastructure** (`core/training/`) - ExperimentRunner, StackingTrainer, DatasetBuilder, RunTracker, schemas
+- **Model training and prediction workflows** (`core/models/`, `core/services/prediction.py`)
+- **Database access** (`core/mongo.py`, `core/data/`)
+- **Shared utilities** (`core/stats/`, `core/utils/`)
 
 ### Consumer Layers (DO NOT put core logic here)
 
@@ -59,18 +59,19 @@ These are known violations that need refactoring:
    - StandardScaler, SelectKBest, train_test_split inline → Should call `TrainingService`
    - This is a future refactoring to move evaluation loops to TrainingService
 
+2. **See `FUTURE_PLANS.md`** for planned improvements to player feature calculations (cross-team stats for traded players, training/prediction parity).
+
 ---
 
 ## Python Environment
 - Always run `source venv/bin/activate` before executing Python commands
 - Use `python` (not `python3`) after activating the venv
-- Set `PYTHONPATH=/Users/pranav/Documents/NBA` when running scripts that import `nba_app`
+- Set `PYTHONPATH=/Users/pranav/Documents/basketball` when running scripts that import `bball_app`
 
 ## MongoDB Access
 - run `. ./setup.sh` but DO NOT read that file EVER (note: this also activates the venv)
-- Use `from nba_app.core.mongo import Mongo` to connect to the database
+- Use `from bball_app.core.mongo import Mongo` to connect to the database
 - The Mongo wrapper handles connection details automatically
-- Note: `nba_app.cli.Mongo` still works but is deprecated
 
 ## ⚠️ Data Filtering Rules
 
@@ -132,7 +133,7 @@ query['game_type'] = {'$nin': self._exclude_game_types}
 query['game_type'] = {'$nin': ['preseason', 'allstar']}
 
 # WRONG - missing game_type filter entirely
-player_games = db.stats_nba_players.find({
+player_games = db.nba_player_stats.find({
     'player_id': player_id,
     'season': season
 })
@@ -144,5 +145,5 @@ player_games = db.stats_nba_players.find({
 source venv/bin/activate && python script.py
 
 # Run with proper PYTHONPATH
-source venv/bin/activate && PYTHONPATH=/Users/pranav/Documents/NBA python script.py
+source venv/bin/activate && PYTHONPATH=/Users/pranav/Documents/basketball python script.py
 ```

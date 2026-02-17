@@ -9,9 +9,9 @@ Composes ESPNClient (fetch) + repository layer (save) to provide:
 This is the core-layer replacement for subprocess calls to the legacy ESPN CLI script.
 
 Usage:
-    from nba_app.core.services.espn_sync import fetch_and_save_games, refresh_venues, refresh_players
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.league_config import load_league_config
+    from bball_app.core.services.espn_sync import fetch_and_save_games, refresh_venues, refresh_players
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.league_config import load_league_config
 
     league = load_league_config('nba')
     db = Mongo().db
@@ -29,14 +29,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from threading import Lock
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from pytz import timezone, utc
 
-from nba_app.core.data.espn_client import ESPNClient
+from bball_app.core.data.espn_client import ESPNClient
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 # Threading constants for batch processing
@@ -355,10 +355,11 @@ def _process_game(
     team_only: bool = False,
     players_only: bool = False,
     dry_run: bool = False,
-    event: Optional[Dict] = None
+    event: Optional[Dict] = None,
+    quiet: bool = False
 ) -> Tuple[bool, int]:
     """Process a single game: fetch data and store in MongoDB."""
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league)
 
     game_summary = espn_client.get_game_summary(game_id)
@@ -668,10 +669,11 @@ def _process_game(
                 flat_update[key] = value
         league_db.stats_nba.update_one(query, {'$set': flat_update}, upsert=True)
 
-    if dry_run:
-        print(f"  [DRY RUN] Would store game: {away_name} @ {home_name} ({away_score}-{home_score})")
-    else:
-        print(f"  Stored game: {away_name} @ {home_name} ({away_score}-{home_score})")
+    if not quiet:
+        if dry_run:
+            print(f"  [DRY RUN] Would store game: {away_name} @ {home_name} ({away_score}-{home_score})")
+        else:
+            print(f"  Stored game: {away_name} @ {home_name} ({away_score}-{home_score})")
 
     player_count = 0
     if not team_only:
@@ -722,7 +724,7 @@ def _process_game(
                                 if position_data.get('pos_display_name'):
                                     players_update['pos_display_name'] = position_data['pos_display_name']
 
-                            players_coll = league.collections.get('players', 'players_nba') if league else 'players_nba'
+                            players_coll = league.collections.get('players', 'nba_players') if league else 'nba_players'
                             db[players_coll].update_one(
                                 {'player_id': pstats['player_id']},
                                 {'$set': players_update},
@@ -730,7 +732,7 @@ def _process_game(
                             )
                         player_count += 1
 
-    if not team_only:
+    if not team_only and not quiet:
         if dry_run:
             print(f"    [DRY RUN] Would store {player_count} player stats")
         else:
@@ -745,7 +747,7 @@ def _process_game(
 
 def _create_job(db, league: "LeagueConfig", total_days: int, team_only: bool, players_only: bool) -> Optional[str]:
     """Create a job tracking document for ESPN date-range sync."""
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league)
     job_doc = {
         'type': 'espn_dates_sync',
@@ -775,7 +777,7 @@ def _create_job(db, league: "LeagueConfig", total_days: int, team_only: bool, pl
 def _update_job(db, league: "LeagueConfig", job_id: str, processed_days: int, total_days: int, games_done: int, players_done: int, skipped: int):
     """Update job progress."""
     from bson import ObjectId
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league)
     progress = int(100 * processed_days / total_days) if total_days > 0 else 0
     league_db.jobs_nba.update_one(
@@ -795,7 +797,7 @@ def _update_job(db, league: "LeagueConfig", job_id: str, processed_days: int, to
 def _complete_job(db, league: "LeagueConfig", job_id: str, days_done: int, total_days: int, games_done: int, players_done: int, skipped: int):
     """Mark job as completed."""
     from bson import ObjectId
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league)
     failed_games = 0
     try:
@@ -821,7 +823,7 @@ def _complete_job(db, league: "LeagueConfig", job_id: str, days_done: int, total
 def _fail_job(db, league: "LeagueConfig", job_id: str, error: str):
     """Mark job as failed."""
     from bson import ObjectId
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league)
     league_db.jobs_nba.update_one(
         {'_id': ObjectId(job_id)},
@@ -837,7 +839,7 @@ def _fail_job(db, league: "LeagueConfig", job_id: str, error: str):
 def _record_failure(db, league: "LeagueConfig", job_id: str, game_id: str, error: str):
     """Record a per-game failure."""
     from bson import ObjectId
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league)
     MAX_FAILURES = 200
     try:
@@ -988,7 +990,9 @@ def fetch_and_save_games(
     team_only: bool = False,
     players_only: bool = False,
     dry_run: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    quiet: bool = False,
+    progress_callback: Optional[Callable[[int, str], None]] = None
 ) -> dict:
     """
     Fetch games from ESPN for a date range and save to MongoDB.
@@ -1002,6 +1006,9 @@ def fetch_and_save_games(
         players_only: Only fetch player stats
         dry_run: Preview without database changes
         verbose: Detailed output
+        quiet: Suppress per-game/per-date output (for use with progress_callback)
+        progress_callback: Optional callable(percent: int, message: str) for progress updates.
+                           If provided, bypasses internal job creation and uses this callback instead.
 
     Returns:
         Dict with statistics (games_processed, players_processed, success, error)
@@ -1021,26 +1028,31 @@ def fetch_and_save_games(
 
     use_threading = len(dates) > 500
     job_id = None
-    if use_threading and not dry_run:
+    # Only create internal job if no external progress_callback is provided
+    if use_threading and not dry_run and not progress_callback:
         job_id = _create_job(db, league_config, len(dates), team_only, players_only)
 
     progress_lock = Lock()
     progress = {'days_processed': 0, 'total_days': len(dates), 'games': 0, 'players': 0, 'skipped': 0}
 
     def process_one_date(game_date: date) -> Tuple[int, int, int, Optional[date]]:
-        print(f"\nFetching games for {game_date}...")
+        if not quiet:
+            print(f"\nFetching games for {game_date}...")
 
         scoreboard = espn_client.get_scoreboard_site(game_date)
         if not scoreboard:
-            print(f"  Error fetching scoreboard for {game_date}")
+            if not quiet:
+                print(f"  Error fetching scoreboard for {game_date}")
             return 0, 0, 0, None
 
         events = scoreboard.get('events', [])
         if not events:
-            print(f"  No games found for {game_date}")
+            if not quiet:
+                print(f"  No games found for {game_date}")
             return 0, 0, 0, None
 
-        print(f"  Found {len(events)} events from API")
+        if not quiet:
+            print(f"  Found {len(events)} events from API")
 
         skipped_this = 0
         processed_this = 0
@@ -1059,11 +1071,13 @@ def fetch_and_save_games(
                 if event_dt:
                     event_date = event_dt.date()
                     if event_date != game_date:
-                        print(f"    Skipping {short_name}: date mismatch (UTC: {event_date_str[:10]} -> ET: {event_date}, requested: {game_date})")
+                        if not quiet:
+                            print(f"    Skipping {short_name}: date mismatch (UTC: {event_date_str[:10]} -> ET: {event_date}, requested: {game_date})")
                         skipped_this += 1
                         continue
                 else:
-                    print(f"    Skipping {short_name}: could not parse date {event_date_str}")
+                    if not quiet:
+                        print(f"    Skipping {short_name}: could not parse date {event_date_str}")
                     skipped_this += 1
                     continue
 
@@ -1071,10 +1085,11 @@ def fetch_and_save_games(
                 success, pcount = _process_game(
                     gid, game_date, db, league_config, espn_client,
                     team_only=team_only, players_only=players_only,
-                    dry_run=dry_run, event=evt
+                    dry_run=dry_run, event=evt, quiet=quiet
                 )
             except Exception as e:
-                print(f"  ERROR processing game {gid} on {game_date}: {e}")
+                if not quiet:
+                    print(f"  ERROR processing game {gid} on {game_date}: {e}")
                 if job_id:
                     _record_failure(db, league_config, job_id, str(gid), str(e))
                 continue
@@ -1083,7 +1098,8 @@ def fetch_and_save_games(
                 processed_this += 1
                 players_this += pcount
 
-        print(f"  Processed: {processed_this}, Skipped (wrong date): {skipped_this}")
+        if not quiet:
+            print(f"  Processed: {processed_this}, Skipped (wrong date): {skipped_this}")
         return processed_this, players_this, skipped_this, game_date
 
     if use_threading:
@@ -1103,9 +1119,17 @@ def fetch_and_save_games(
                     progress['players'] += p
                     progress['skipped'] += s
                     days_done = progress['days_processed']
-                if job_id and (days_done % 25 == 0 or days_done == progress['total_days']):
-                    _update_job(db, league_config, job_id, days_done, progress['total_days'],
-                                progress['games'], progress['players'], progress['skipped'])
+                    games_done = progress['games']
+                # Report progress via callback or internal job
+                should_report = days_done % 5 == 0 or days_done == progress['total_days']
+                if should_report:
+                    pct = int(100 * days_done / progress['total_days']) if progress['total_days'] > 0 else 0
+                    msg = f"Pulled {games_done} games ({days_done}/{progress['total_days']} days)"
+                    if progress_callback:
+                        progress_callback(pct, msg)
+                    elif job_id:
+                        _update_job(db, league_config, job_id, days_done, progress['total_days'],
+                                    games_done, progress['players'], progress['skipped'])
             return cg, cp, cs
 
         try:
@@ -1133,17 +1157,25 @@ def fetch_and_save_games(
                 _fail_job(db, league_config, job_id, str(e))
             raise
     else:
-        for game_date in dates:
+        total_days = len(dates)
+        for idx, game_date in enumerate(dates):
             g, p, s, _ = process_one_date(game_date)
             total_games += g
             total_players += p
             total_skipped += s
+            # Report progress via callback for non-threading path
+            if progress_callback:
+                days_done = idx + 1
+                pct = int(100 * days_done / total_days) if total_days > 0 else 0
+                msg = f"Pulled {total_games} games ({days_done}/{total_days} days)"
+                progress_callback(pct, msg)
 
-    print(f"\n{'[DRY RUN] ' if dry_run else ''}Summary:")
-    print(f"  Games processed: {total_games}")
-    print(f"  Games skipped (date mismatch): {total_skipped}")
-    if not team_only:
-        print(f"  Player stats processed: {total_players}")
+    if not quiet:
+        print(f"\n{'[DRY RUN] ' if dry_run else ''}Summary:")
+        print(f"  Games processed: {total_games}")
+        print(f"  Games skipped (date mismatch): {total_skipped}")
+        if not team_only:
+            print(f"  Player stats processed: {total_players}")
 
     return {
         'games_processed': total_games,
@@ -1169,7 +1201,7 @@ def refresh_venues(
     Returns:
         Dict with statistics
     """
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league_config)
 
     print("Refreshing venue location data...")
@@ -1249,6 +1281,112 @@ def refresh_venues(
     return {'success': True, 'matched': matched_count, 'unmatched': unmatched_count}
 
 
+def geocode_missing_venues(db, league_config, dry_run=False):
+    """
+    Geocode venues that are missing location coordinates.
+
+    Uses Nominatim geocoding with ESPN address fields (fullName, city, state).
+    Rate-limited to 1 request/second per Nominatim ToS.
+
+    Args:
+        db: MongoDB database instance
+        league_config: League configuration
+        dry_run: Preview without database changes
+
+    Returns:
+        Dict with statistics: geocoded, failed, skipped, already_have_location
+    """
+    from geopy.geocoders import Nominatim
+    from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
+    league_db = LeagueDbProxy(db, league_config)
+
+    venues_col = league_db.nba_venues
+
+    already_have = venues_col.count_documents({'location.lat': {'$exists': True}})
+    missing = list(venues_col.find(
+        {'$or': [
+            {'location': {'$exists': False}},
+            {'location.lat': {'$exists': False}},
+        ]},
+        {'venue_guid': 1, 'fullName': 1, 'address': 1}
+    ))
+
+    if not missing:
+        return {'geocoded': 0, 'failed': 0, 'skipped': 0, 'already_have_location': already_have}
+
+    geolocator = Nominatim(user_agent="bball_app/1.0", timeout=10)
+
+    geocoded = 0
+    failed = 0
+    skipped = 0
+
+    for i, venue in enumerate(missing):
+        venue_guid = venue.get('venue_guid')
+        full_name = venue.get('fullName', '')
+        address = venue.get('address') or {}
+
+        if not full_name:
+            skipped += 1
+            continue
+
+        city = address.get('city', '') if isinstance(address, dict) else ''
+        state = address.get('state', '') if isinstance(address, dict) else ''
+
+        # Primary query: arena name + city + state
+        query_parts = [full_name]
+        if city:
+            query_parts.append(city)
+        if state:
+            query_parts.append(state)
+        query = ", ".join(query_parts)
+
+        # Rate limit: 1 req/sec
+        if i > 0:
+            time.sleep(1)
+
+        try:
+            location = geolocator.geocode(query)
+
+            # Fallback: try street address if arena name didn't work
+            if not location and address.get('street'):
+                fallback_parts = [address['street']]
+                if city:
+                    fallback_parts.append(city)
+                if state:
+                    postal = address.get('postalCode', '')
+                    fallback_parts.append(f"{state} {postal}".strip())
+                fallback_query = ", ".join(fallback_parts)
+                time.sleep(1)
+                location = geolocator.geocode(fallback_query)
+
+            if location:
+                if not dry_run:
+                    venues_col.update_one(
+                        {'venue_guid': venue_guid},
+                        {'$set': {'location': {'lat': location.latitude, 'lon': location.longitude}}}
+                    )
+                geocoded += 1
+            else:
+                failed += 1
+        except (GeocoderTimedOut, GeocoderServiceError) as e:
+            print(f"    Warning: Geocoding failed for '{full_name}': {e}")
+            failed += 1
+        except Exception as e:
+            print(f"    Warning: Unexpected geocoding error for '{full_name}': {e}")
+            failed += 1
+
+    print(f"  Geocoded {geocoded}/{len(missing)} venues ({failed} failed, {skipped} skipped)")
+
+    return {
+        'geocoded': geocoded,
+        'failed': failed,
+        'skipped': skipped,
+        'already_have_location': already_have,
+    }
+
+
 def refresh_players(
     db,
     league_config: "LeagueConfig",
@@ -1265,7 +1403,7 @@ def refresh_players(
     Returns:
         Dict with statistics
     """
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     league_db = LeagueDbProxy(db, league_config)
 
     print("Refreshing players metadata...")
@@ -1315,3 +1453,245 @@ def refresh_players(
         print(f"  Upserted {len(players)} players")
 
     return {'success': True, 'players_count': len(players)}
+
+
+def refresh_teams(
+    db,
+    league_config: "LeagueConfig",
+    dry_run: bool = False
+) -> dict:
+    """
+    Refresh teams collection from ESPN teams API.
+
+    Fetches all teams (with pagination), extracts conference info,
+    and upserts into the league's teams collection.
+
+    Args:
+        db: MongoDB database instance
+        league_config: League configuration
+        dry_run: Preview without database changes
+
+    Returns:
+        Dict with statistics
+    """
+    from bball_app.core.data.espn_client import ESPNClient
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
+
+    league_db = LeagueDbProxy(db, league_config)
+    client = ESPNClient(league=league_config)
+
+    print("Refreshing teams metadata from ESPN...")
+
+    # Fetch all teams with pagination
+    all_teams = []
+    page = 1
+    while True:
+        data = client.get_teams(page=page, limit=500)
+        if not data:
+            break
+
+        page_teams = []
+
+        # ESPN response: {sports: [{leagues: [{teams: [...]}]}]}
+        for sport in data.get('sports', []):
+            for league_obj in sport.get('leagues', []):
+                for team_wrapper in league_obj.get('teams', []):
+                    team = team_wrapper.get('team', team_wrapper)
+                    page_teams.append(team)
+
+        # Flat structure fallback
+        if not page_teams:
+            for team_wrapper in data.get('teams', []):
+                team = team_wrapper.get('team', team_wrapper)
+                page_teams.append(team)
+
+        if not page_teams:
+            break
+
+        all_teams.extend(page_teams)
+
+        page_count = data.get('pageCount', 1)
+        if page >= page_count:
+            break
+        page += 1
+
+    if not all_teams:
+        print("  No teams fetched from ESPN API")
+        return {'success': False, 'error': 'No teams from API'}
+
+    print(f"  Fetched {len(all_teams)} teams from ESPN ({page} page(s))")
+
+    if dry_run:
+        print(f"  [DRY RUN] Would upsert {len(all_teams)} teams")
+        for t in all_teams[:5]:
+            print(f"    - {t.get('displayName')} ({t.get('abbreviation')})")
+        if len(all_teams) > 5:
+            print(f"    ... and {len(all_teams) - 5} more")
+        return {'success': True, 'teams_count': len(all_teams)}
+
+    upserted = 0
+    for team in all_teams:
+        team_id = str(team.get('id', ''))
+        if not team_id:
+            continue
+
+        # Extract conference from groups
+        conference = None
+        conference_id = None
+        groups = team.get('groups', {})
+        if isinstance(groups, dict):
+            parent = groups.get('parent', {})
+            if parent and parent.get('name'):
+                conference = parent['name']
+                conference_id = str(parent.get('id', ''))
+            elif groups.get('name'):
+                conference = groups['name']
+                conference_id = str(groups.get('id', ''))
+        elif isinstance(groups, list):
+            for g in groups:
+                if g.get('isConference') or g.get('type') == 'conference':
+                    conference = g.get('name') or g.get('shortName')
+                    conference_id = str(g.get('id', ''))
+                    break
+            if not conference and groups:
+                conference = groups[0].get('name')
+                conference_id = str(groups[0].get('id', ''))
+
+        # Extract logo URL
+        logo = None
+        logos = team.get('logos', [])
+        if logos and isinstance(logos, list):
+            logo = logos[0].get('href', '')
+        if not logo:
+            logo = f"https://a.espncdn.com/i/teamlogos/ncaa/500/{team_id}.png"
+
+        team_doc = {
+            'team_id': team_id,
+            'id': team_id,
+            'abbreviation': team.get('abbreviation', ''),
+            'displayName': team.get('displayName', ''),
+            'shortDisplayName': team.get('shortDisplayName', ''),
+            'name': team.get('name', ''),
+            'location': team.get('location', ''),
+            'slug': team.get('slug', ''),
+            'uid': team.get('uid', ''),
+            'color': team.get('color', ''),
+            'alternateColor': team.get('alternateColor', ''),
+            'logo': logo,
+            'links': team.get('links', []),
+            'nickname': team.get('nickname', ''),
+            'isActive': team.get('isActive', True),
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
+        }
+
+        if conference:
+            team_doc['conference'] = conference
+        if conference_id:
+            team_doc['conference_id'] = conference_id
+
+        league_db.teams_nba.update_one(
+            {'team_id': team_id},
+            {'$set': team_doc, '$setOnInsert': {'created_at': datetime.now()}},
+            upsert=True
+        )
+        upserted += 1
+
+    print(f"  Upserted {upserted} teams")
+
+    return {'success': True, 'teams_count': upserted}
+
+
+def refresh_team_conferences(
+    db,
+    league_config: "LeagueConfig",
+    dry_run: bool = False
+) -> dict:
+    """
+    Refresh team conference data from ESPN groups endpoint.
+
+    The /teams endpoint doesn't include conference info for college sports.
+    The /groups endpoint returns conferences with their member teams, which
+    is the only reliable source for this data.
+
+    Args:
+        db: MongoDB database instance
+        league_config: League configuration
+        dry_run: Preview without database changes
+
+    Returns:
+        Dict with statistics: success, updated, conferences
+    """
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
+
+    league_db = LeagueDbProxy(db, league_config)
+    espn = league_config.espn
+    base_url_site = espn.get('base_url_site', 'https://site.api.espn.com')
+    sport_path = espn.get('sport_path', league_config.league_id)
+
+    url = f"{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/groups"
+
+    print(f"Fetching conference data from ESPN groups endpoint...")
+
+    try:
+        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        print(f"  Error fetching groups: {e}")
+        return {'success': False, 'error': str(e), 'updated': 0, 'conferences': 0}
+
+    # Parse conferences and their teams
+    # ESPN groups response can be:
+    #   { "groups": [{ "children": [{ "name": "ACC", "teams": [...] }] }] }
+    # or sometimes groups at the top level ARE the conferences with teams directly
+    conf_count = 0
+    updated = 0
+
+    top_groups = data.get('groups', [])
+    if not top_groups:
+        top_groups = data.get('children', [])
+
+    conferences = []
+    for group in top_groups:
+        children = group.get('children', [])
+        if children:
+            # Two-level: divisions -> conferences with teams
+            conferences.extend(children)
+        elif group.get('teams'):
+            # Single-level: group itself is a conference with teams
+            conferences.append(group)
+
+    if not conferences:
+        print(f"  No conferences found in groups response (keys: {list(data.keys())})")
+        return {'success': False, 'error': 'No conferences in response', 'updated': 0, 'conferences': 0}
+
+    for conf in conferences:
+        conf_name = conf.get('name') or conf.get('shortName') or conf.get('abbreviation')
+        if not conf_name:
+            continue
+
+        conf_count += 1
+        teams = conf.get('teams', [])
+
+        for team_wrapper in teams:
+            team = team_wrapper.get('team', team_wrapper)
+            team_id = str(team.get('id', ''))
+            if not team_id:
+                continue
+
+            if dry_run:
+                abbrev = team.get('abbreviation', '?')
+                print(f"  [DRY RUN] {abbrev} (id={team_id}) -> {conf_name}")
+                updated += 1
+                continue
+
+            result = league_db.teams_nba.update_one(
+                {'team_id': team_id},
+                {'$set': {'conference': conf_name}},
+            )
+            if result.matched_count > 0:
+                updated += 1
+
+    print(f"  {'[DRY RUN] ' if dry_run else ''}Found {conf_count} conferences, updated {updated} teams")
+
+    return {'success': True, 'updated': updated, 'conferences': conf_count}

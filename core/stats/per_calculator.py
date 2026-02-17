@@ -30,13 +30,13 @@ from typing import Dict, List, Optional, Tuple
 import logging
 import numpy as np
 
-from nba_app.core.mongo import Mongo
+from bball_app.core.mongo import Mongo
 from typing import TYPE_CHECKING
-from nba_app.core.data import (
+from bball_app.core.data import (
     GamesRepository, PlayerStatsRepository, PlayersRepository,
     RostersRepository, LeagueStatsCache
 )
-from nba_app.core.stats.league_cache import (
+from bball_app.core.stats.league_cache import (
     get_season_stats_with_fallback,
     get_league_constants,
     get_team_pace,
@@ -44,7 +44,7 @@ from nba_app.core.stats.league_cache import (
 )
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 # MongoDB collection for cached PER features
 CACHED_PER_COLLECTION = 'cached_per_features'
@@ -113,6 +113,10 @@ class PERCalculator:
         self._team_stats_cache = None    # {(team, season): [game_stats sorted by date]}
         self._per_features_cache = {}    # {game_key: features} - in-memory cache
         self._team_players_agg_cache = {}  # {(team, season, before_date): [aggregated player data]} - cache aggregated results
+
+        # Cross-team caches for training (traded player support)
+        self._player_stats_by_player = None  # {(player_id, season): [player_games]} - for cross-team aggregation
+        self._game_to_players_cache = None   # {game_id: {team: [player_ids]}} - maps game to actual participants
         
         self._preloaded = False
         if preload:
@@ -164,10 +168,28 @@ class PERCalculator:
         
         # Index by (team, season) for fast lookup
         self._player_stats_cache = defaultdict(list)
+        # Also build cross-team indices for training (traded player support)
+        self._player_stats_by_player = defaultdict(list)
+        self._game_to_players_cache = defaultdict(lambda: defaultdict(list))
+
         for ps in player_stats:
-            key = (ps.get('team'), ps.get('season'))
+            team = ps.get('team')
+            season = ps.get('season')
+            key = (team, season)
             self._player_stats_cache[key].append(ps)
+
+            # Index by (player_id, season) for cross-team lookups
+            player_id = str(ps.get('player_id'))
+            player_key = (player_id, season)
+            self._player_stats_by_player[player_key].append(ps)
+
+            # Index by game_id -> team -> [player_ids] for finding game participants
+            game_id = ps.get('game_id')
+            if game_id and team:
+                self._game_to_players_cache[game_id][team].append(player_id)
+
         print(f"    Indexed into {len(self._player_stats_cache)} team-season combinations")
+        print(f"    Cross-team indices: {len(self._player_stats_by_player)} player-season keys, {len(self._game_to_players_cache)} games")
 
         # Load team stats from stats_nba (no sort - do it in Python)
         print("  Preloading team stats into memory...")
@@ -548,7 +570,50 @@ class PERCalculator:
     # =========================================================================
     # OPTIMIZED DATA ACCESS (uses preloaded cache)
     # =========================================================================
-    
+
+    def _aggregate_player_games(self, player_games: List[dict]) -> dict:
+        """
+        Aggregate a list of player game docs into summary stats.
+
+        Args:
+            player_games: List of player-game documents with 'stats', 'player_id', etc.
+
+        Returns:
+            Aggregated dict matching the format of _get_team_players_before_date_cached output
+        """
+        if not player_games:
+            return {}
+
+        first = player_games[0]
+        total_min = sum(pg.get('stats', {}).get('min', 0) for pg in player_games)
+        games = len(player_games)
+
+        if games == 0 or total_min == 0:
+            return {}
+
+        return {
+            '_id': str(first.get('player_id')),
+            'player_name': first.get('player_name', 'Unknown'),
+            'games': games,
+            'games_5min': sum(1 for pg in player_games if pg.get('stats', {}).get('min', 0) >= 5),
+            'total_min': total_min,
+            'total_pts': sum(pg.get('stats', {}).get('pts', 0) for pg in player_games),
+            'total_fg_made': sum(pg.get('stats', {}).get('fg_made', 0) for pg in player_games),
+            'total_fg_att': sum(pg.get('stats', {}).get('fg_att', 0) for pg in player_games),
+            'total_three_made': sum(pg.get('stats', {}).get('three_made', 0) for pg in player_games),
+            'total_ft_made': sum(pg.get('stats', {}).get('ft_made', 0) for pg in player_games),
+            'total_ft_att': sum(pg.get('stats', {}).get('ft_att', 0) for pg in player_games),
+            'total_reb': sum(pg.get('stats', {}).get('reb', 0) for pg in player_games),
+            'total_oreb': sum(pg.get('stats', {}).get('oreb', 0) for pg in player_games),
+            'total_ast': sum(pg.get('stats', {}).get('ast', 0) for pg in player_games),
+            'total_stl': sum(pg.get('stats', {}).get('stl', 0) for pg in player_games),
+            'total_blk': sum(pg.get('stats', {}).get('blk', 0) for pg in player_games),
+            'total_to': sum(pg.get('stats', {}).get('to', 0) for pg in player_games),
+            'total_pf': sum(pg.get('stats', {}).get('pf', 0) for pg in player_games),
+            'avg_min': total_min / games,
+            'starter_games': sum(1 for pg in player_games if pg.get('starter', False))
+        }
+
     def _get_team_players_before_date_cached(
         self,
         team: str,
@@ -720,7 +785,118 @@ class PERCalculator:
         ]
         result = self._players_repo.aggregate(pipeline)
         return result
-    
+
+    def _get_players_for_game_cross_team(
+        self,
+        game_id: str,
+        team: str,
+        season: str,
+        before_date: str,
+        min_games: int = 1
+    ) -> List[dict]:
+        """
+        Get aggregated stats for players who played in a specific game,
+        aggregating their stats across ALL teams (cross-team).
+
+        Used for training to include traded players' full season history.
+        Returns same shape as _get_team_players_before_date_cached().
+
+        Args:
+            game_id: The game ID to find players for
+            team: Team name to get players for (home or away)
+            season: Season string
+            before_date: Date before which to compute stats
+            min_games: Minimum games played threshold
+
+        Returns:
+            List of aggregated player dicts, sorted by total_min descending
+        """
+        if not self._game_to_players_cache or not self._player_stats_by_player:
+            # Cross-team caches not available, fall back to team-specific
+            return self._get_team_players_before_date_cached(team, season, before_date, min_games)
+
+        # Get player IDs who actually played in this game for this team
+        player_ids = self._game_to_players_cache.get(game_id, {}).get(team, [])
+        if not player_ids:
+            return []
+
+        result = []
+        for player_id in set(player_ids):  # dedupe
+            player_key = (str(player_id), season)
+
+            # Get ALL games for this player this season (any team)
+            all_player_games = self._player_stats_by_player.get(player_key, [])
+
+            # Filter to before_date and min > 0
+            games_before = [
+                pg for pg in all_player_games
+                if pg.get('date', '') < before_date and pg.get('stats', {}).get('min', 0) > 0
+            ]
+
+            if len(games_before) < min_games:
+                continue
+
+            # Aggregate using helper
+            agg = self._aggregate_player_games(games_before)
+            if agg and agg.get('total_min', 0) > 0:
+                result.append(agg)
+
+        result.sort(key=lambda x: x['total_min'], reverse=True)
+        return result
+
+    def _get_players_cross_team_by_ids(
+        self,
+        player_ids: List[str],
+        season: str,
+        before_date: str,
+        min_games: int = 1
+    ) -> List[dict]:
+        """
+        Aggregate stats for specified players across ALL teams.
+        Used for prediction when player list comes from rosters.
+
+        This method provides training/prediction parity for traded players:
+        - Training uses _get_players_for_game_cross_team (players from game doc)
+        - Prediction uses this method (players from roster)
+        Both aggregate stats across all teams the player played for.
+
+        Args:
+            player_ids: List of player IDs (strings) to aggregate
+            season: Season string
+            before_date: Date before which to compute stats
+            min_games: Minimum games played threshold
+
+        Returns:
+            List of aggregated player dicts, sorted by total_min descending
+        """
+        if not self._player_stats_by_player:
+            # Cross-team cache not available
+            return []
+
+        result = []
+        for player_id in set(player_ids):  # dedupe
+            player_key = (str(player_id), season)
+
+            # Get ALL games for this player this season (any team)
+            all_player_games = self._player_stats_by_player.get(player_key, [])
+
+            # Filter to before_date and min > 0
+            games_before = [
+                pg for pg in all_player_games
+                if pg.get('date', '') < before_date and pg.get('stats', {}).get('min', 0) > 0
+            ]
+
+            if len(games_before) < min_games:
+                continue
+
+            # Aggregate using helper
+            agg = self._aggregate_player_games(games_before)
+            if agg and agg.get('total_min', 0) > 0:
+                result.append(agg)
+
+        result.sort(key=lambda x: x['total_min'], reverse=True)
+        return result
+
     def _get_team_stats_before_date_cached(
         self,
         team: str,
@@ -817,7 +993,8 @@ class PERCalculator:
         before_date: str,
         player_pers: list,
         starters_set: set = None,
-        team_games_played: int = None
+        team_games_played: int = None,
+        game_id: Optional[str] = None
     ) -> dict:
         """
         Compute all player subset features for a team.
@@ -834,6 +1011,7 @@ class PERCalculator:
             player_pers: List of player dicts with 'player_id', 'per', 'mpg', 'games', 'is_starter'
             starters_set: Optional set of starter player IDs (if None, uses is_starter flag)
             team_games_played: Number of team games played (for GP_THRESH calc)
+            game_id: Optional game ID for training mode (enables cross-team aggregation)
 
         Returns:
             Dict with all player subset features
@@ -898,9 +1076,11 @@ class PERCalculator:
             result['player_bench_per_weighted_MPG'] = float(bench_weighted_mpg)
 
             # Recency-weighted with different k values
+            cross_team = bool(game_id)
             for k in [35, 40, 45, 50]:
                 bench_recency = self._compute_subset_recency_weighted_per(
-                    [str(p['player_id']) for p in bench], team, season, before_date, k
+                    [str(p['player_id']) for p in bench], team, season, before_date, k,
+                    cross_team=cross_team
                 )
                 result[f'player_bench_per_weighted_MIN_REC_k{k}'] = float(bench_recency)
         else:
@@ -917,9 +1097,11 @@ class PERCalculator:
             result['player_rotation_per_weighted_MPG'] = float(rotation_weighted_mpg)
 
             # Recency-weighted with different k values (lower k = faster decay)
+            cross_team = bool(game_id)
             for k in [20, 25, 30, 35]:
                 rotation_recency = self._compute_subset_recency_weighted_per(
-                    [str(p['player_id']) for p in rotation], team, season, before_date, k
+                    [str(p['player_id']) for p in rotation], team, season, before_date, k,
+                    cross_team=cross_team
                 )
                 result[f'player_rotation_per_weighted_MIN_REC_k{k}'] = float(rotation_recency)
         else:
@@ -959,9 +1141,11 @@ class PERCalculator:
             result['player_star_score_top3_sum'] = 0.0
 
         # Recency-weighted star scores
+        cross_team = bool(game_id)
         for k in [20, 25, 30, 35]:
             recency_star_scores = self._compute_recency_star_scores(
-                [str(p['player_id']) for p in rotation], team, season, before_date, k
+                [str(p['player_id']) for p in rotation], team, season, before_date, k,
+                cross_team=cross_team
             )
             if recency_star_scores:
                 recency_sorted = sorted(recency_star_scores, key=lambda x: x['star_score'], reverse=True)
@@ -987,9 +1171,11 @@ class PERCalculator:
             result['player_star_share_top3_share'] = 0.0
 
         # Recency-weighted star shares
+        cross_team = bool(game_id)
         for k in [20, 25, 30, 35]:
             recency_star_scores = self._compute_recency_star_scores(
-                [str(p['player_id']) for p in rotation], team, season, before_date, k
+                [str(p['player_id']) for p in rotation], team, season, before_date, k,
+                cross_team=cross_team
             )
             total_recency = sum(s['star_score'] for s in recency_star_scores) if recency_star_scores else 0.0
             if total_recency > EPS and recency_star_scores:
@@ -1051,7 +1237,8 @@ class PERCalculator:
         team: str,
         season: str,
         before_date: str,
-        recency_decay_k: float
+        recency_decay_k: float,
+        cross_team: bool = False
     ) -> float:
         """
         Compute recency-weighted PER for a subset of players.
@@ -1060,6 +1247,14 @@ class PERCalculator:
         where weight_g = exp(-days_since_game / k)
 
         PER is computed from box score stats for each game (not stored in DB).
+
+        Args:
+            player_ids: List of player IDs
+            team: Team name
+            season: Season string
+            before_date: Date string
+            recency_decay_k: Decay constant for recency weighting
+            cross_team: If True, include games from all teams (for traded players in training)
         """
         import math
         from datetime import datetime
@@ -1108,7 +1303,7 @@ class PERCalculator:
 
         for player_id in player_ids:
             # Get player's per-game data
-            player_games = self._get_player_games_for_subset(player_id, team, season, before_date)
+            player_games = self._get_player_games_for_subset(player_id, team, season, before_date, cross_team=cross_team)
 
             for pg in player_games:
                 game_date_str = pg.get('date', '')
@@ -1185,7 +1380,8 @@ class PERCalculator:
         team: str,
         season: str,
         before_date: str,
-        recency_decay_k: float
+        recency_decay_k: float,
+        cross_team: bool = False
     ) -> list:
         """
         Compute recency-weighted star scores (PER × MIN) for a list of players.
@@ -1193,6 +1389,14 @@ class PERCalculator:
         Returns list of {'player_id': id, 'star_score': score}
 
         PER is computed from box score stats for each game (not stored in DB).
+
+        Args:
+            player_ids: List of player IDs
+            team: Team name
+            season: Season string
+            before_date: Date string
+            recency_decay_k: Decay constant for recency weighting
+            cross_team: If True, include games from all teams (for traded players in training)
         """
         import math
         from datetime import datetime
@@ -1233,7 +1437,7 @@ class PERCalculator:
                 game_team_data[tg['game_id']] = tg['team_data']
 
         for player_id in player_ids:
-            player_games = self._get_player_games_for_subset(player_id, team, season, before_date)
+            player_games = self._get_player_games_for_subset(player_id, team, season, before_date, cross_team=cross_team)
 
             nums = []
             denoms = []
@@ -1318,9 +1522,29 @@ class PERCalculator:
         player_id: str,
         team: str,
         season: str,
-        before_date: str
+        before_date: str,
+        cross_team: bool = False
     ) -> list:
-        """Get a player's games for subset feature calculations."""
+        """
+        Get a player's games for subset feature calculations.
+
+        Args:
+            player_id: Player ID
+            team: Team name (used for team-specific lookup)
+            season: Season string
+            before_date: Date before which to get games
+            cross_team: If True, get games across ALL teams (for training with traded players)
+        """
+        if cross_team and self._player_stats_by_player:
+            # Cross-team: return ALL games for this player this season (any team)
+            player_key = (str(player_id), season)
+            all_games = self._player_stats_by_player.get(player_key, [])
+            return [
+                pg for pg in all_games
+                if pg.get('date', '') < before_date and pg.get('stats', {}).get('min', 0) > 0
+            ]
+
+        # Team-specific lookup (original behavior)
         key = (team, season)
 
         # Use preloaded cache if available
@@ -1380,12 +1604,13 @@ class PERCalculator:
         before_date: str,
         top_n: int = 8,
         player_filters: Optional[Dict] = None,
-        injured_players: Optional[List[str]] = None
+        injured_players: Optional[List[str]] = None,
+        game_id: Optional[str] = None
     ) -> Optional[dict]:
         """
         Compute team-level PER features for game prediction.
         Uses preloaded cache for fast computation.
-        
+
         Args:
             team: Team name
             season: Season string
@@ -1394,14 +1619,30 @@ class PERCalculator:
             player_filters: Optional dict with keys:
                 - 'playing': List of player_ids that are playing (exclude others)
                 - 'starters': List of player_ids that are starters
-            injured_players: Optional list of injured player IDs (strings). 
+            injured_players: Optional list of injured player IDs (strings).
                 If provided, these players will be excluded from PER calculations.
                 Training: Should pass stats_nba.{home/away}Team.injured_players
                 Prediction: Should pass injured players from nba_rosters.injured flag
+            game_id: Optional game ID for training mode. When provided, uses cross-team
+                aggregation to include traded players' full season history.
         """
         logger = logging.getLogger(__name__)
         # Get all players who have played for this team
-        players = self._get_team_players_before_date_cached(team, season, before_date, min_games=1)
+        # Training mode: use cross-team aggregation for traded player support
+        if game_id and self._game_to_players_cache:
+            players = self._get_players_for_game_cross_team(game_id, team, season, before_date, min_games=1)
+        elif player_filters and self._player_stats_by_player:
+            # Prediction mode with roster data: get player IDs from roster, aggregate cross-team
+            # This ensures traded players' full season stats are included (matching training behavior)
+            player_ids = [str(pid) for pid in player_filters.get('playing', [])]
+            if player_ids:
+                players = self._get_players_cross_team_by_ids(player_ids, season, before_date, min_games=1)
+            else:
+                # Empty roster, fall back to team-specific lookup
+                players = self._get_team_players_before_date_cached(team, season, before_date, min_games=1)
+        else:
+            # Fallback: team-specific lookup (no cross-team cache available)
+            players = self._get_team_players_before_date_cached(team, season, before_date, min_games=1)
         if not players:
             logger.debug(f"[PER] No players found for {team} before {before_date}")
             return None
@@ -1412,7 +1653,7 @@ class PERCalculator:
         
         # DEBUG: If player_filters provided, check for mismatches early (before any filtering)
         if player_filters:
-            playing_list_check = player_filters.get(team, {}).get('playing', [])
+            playing_list_check = player_filters.get('playing', [])
             if playing_list_check:
                 playing_set_check = {str(pid) for pid in playing_list_check}
                 unmatched_early = playing_set_check - initial_player_ids
@@ -1440,30 +1681,6 @@ class PERCalculator:
                 removed_by_injury = players_before_injury - players_after_injury
                 logger.debug(f"[PER] {team}: Removed {removed_by_injury} injured players from PER calculations")
         
-        # Phase 2.2: Filter to roster players if player_filters is provided (prediction mode)
-        # This ensures we only consider players who are actually on the roster
-        if player_filters:
-            player_ids = [p['_id'] for p in players]
-            roster_player_ids = set()
-            
-            if player_ids:
-                # Get roster from nba_rosters collection for roster membership
-                # nba_rosters uses season + team as unique key
-                roster_doc = self._rosters_repo.find_roster(team, season)
-                
-                if roster_doc:
-                    roster = roster_doc.get('roster', [])
-                    for roster_entry in roster:
-                        roster_player_id = str(roster_entry.get('player_id', ''))
-                        roster_player_ids.add(roster_player_id)
-                
-                # If roster exists, filter to only players in the roster
-                if roster_player_ids:
-                    players_before_roster = len(players)
-                    players = [p for p in players if str(p['_id']) in roster_player_ids]
-                    players_after_roster = len(players)
-                    logger.debug(f"[PER] {team}: Filtering to {len(roster_player_ids)} players from nba_rosters: {players_before_roster} -> {players_after_roster}")
-        
         db_filtered_count = len(players)
         logger.debug(f"[PER] {team}: {db_filtered_count} players after filtering")
         
@@ -1475,16 +1692,23 @@ class PERCalculator:
         # Store filter sets for later use
         playing_set = None
         starters_set = None
-        
+
         # Phase 2.3: Apply player filters if provided and validate IDs
+
         if player_filters:
             playing_list = player_filters.get('playing', [])
             starters_list = player_filters.get('starters', [])
-            
-            if playing_list:
+
+            # If player_filters provided but playing list is empty, roster data is missing
+            # Fall back to using all historical players (like training mode)
+            if not playing_list:
+                logger.warning(f"[PER] {team}: player_filters provided but playing list is empty - falling back to historical players")
+                player_filters = None  # Disable filtering, use all historical players
+            else:
+                # Filter to roster players
                 playing_set = set(playing_list)
-                
-                # Phase 2.2: Hard ID mismatch check
+
+                # Hard ID mismatch check
                 # Normalize both to strings to handle type mismatches (player_id can be int or str in DB)
                 available_ids = {str(p['_id']) for p in players}
                 playing_set_str = {str(pid) for pid in playing_list}
@@ -1503,7 +1727,7 @@ class PERCalculator:
                         player_name_map = {doc['player_id']: doc.get('player_name', 'Unknown') for doc in unmatched_docs}
                     except Exception as e:
                         logger.debug(f"Error looking up player names: {e}")
-                    
+
                     # Build player info strings (ID: Name if available, otherwise just ID)
                     player_info_list = []
                     for pid in unmatched_list[:10]:  # Show up to 10
@@ -1512,7 +1736,7 @@ class PERCalculator:
                             player_info_list.append(f"{pid} ({name})")
                         else:
                             player_info_list.append(pid)
-                    
+
                     # DEBUG: Check why these players are unmatched
                     debug_info = []
                     for unmatched_id in unmatched_list[:5]:  # Check first 5 unmatched
@@ -1531,14 +1755,14 @@ class PERCalculator:
                             limit=3
                         )
                         debug_info.append(f"{unmatched_id}: {len(stats_check)} games before {before_date}")
-                        
+
                         # Check if they're in the initial players list (before filtering)
                         initial_players_check = [p for p in players if str(p.get('_id', '')) == unmatched_id]
                         if initial_players_check:
                             debug_info.append(f"  -> Found in players list after filtering")
                         else:
                             debug_info.append(f"  -> NOT in players list after filtering")
-                    
+
                     # Build detailed warning message
                     warning_msg = (
                         f"[PER] {team}: Some player_filters IDs not found in available players. "
@@ -1550,16 +1774,16 @@ class PERCalculator:
                     )
                     if len(unmatched) > 10:
                         warning_msg += f" (showing first 10 of {len(unmatched)})"
-                    
+
                     logger.warning(warning_msg)
-                
+
                 # Filter to only players who are playing (normalize _id to string for comparison)
                 players = [p for p in players if str(p['_id']) in playing_set_str]
                 logger.debug(f"[PER] {team}: {len(players)} players after applying 'playing' filter")
-            
-            if starters_list:
-                starters_set = set(starters_list)
-                logger.debug(f"[PER] {team}: {len(starters_set)} starters specified in filter")
+
+                if starters_list:
+                    starters_set = set(starters_list)
+                    logger.debug(f"[PER] {team}: {len(starters_set)} starters specified in filter")
 
         # Get league constants
         league_constants = get_league_constants(season, self.db, league=self.league)
@@ -1653,13 +1877,10 @@ class PERCalculator:
             # - Prediction: player_filters['starters'] comes from UI (which syncs with nba_rosters.starter)
             if player_filters:
                 # Use starter status from player_filters (source of truth)
-                # player_filters['starters'] already contains the correct starter list:
-                # - Training: Built from stats_nba_players.starter for the specific game
-                # - Prediction: Built from UI's player_config (which syncs with nba_rosters)
-                starters_set = player_filters.get(team, {}).get('starters', [])
-                if starters_set:
-                    # player_filters['starters'] is the authority
-                    is_starter = str(player['_id']) in {str(sid) for sid in starters_set}
+                # player_filters is already the team-level dict: {'playing': [...], 'starters': [...], ...}
+                starters_list = player_filters.get('starters', [])
+                if starters_list:
+                    is_starter = str(player['_id']) in {str(sid) for sid in starters_list}
                 else:
                     # Fallback: if no starters in player_filters, use historical heuristic
                     is_starter = player['starter_games'] > player['games'] / 2
@@ -1712,34 +1933,11 @@ class PERCalculator:
                 total_mpg += mpg
         per_weighted = weighted_sum / total_mpg if total_mpg > 0 else 0
         
-        # Phase 4.1: For startersPerAvg calculation, use nba_rosters.starter as authority for prediction
-        # CRITICAL: For prediction mode, starter status MUST come from nba_rosters.starter (not historical heuristic)
-        # This ensures startersPerAvg uses the current game's starter lineup from nba_rosters collection
         if player_filters:
-            # Prediction mode: nba_rosters.starter is the authority for starter status
-            # Query nba_rosters collection to get current starter status for this game
-            # Note: player_pers already excludes injured players (filtered earlier)
-            player_ids = [str(p['player_id']) for p in player_pers]
-            starter_ids = set()
-            
-            roster_doc = self._rosters_repo.find_roster(team, season)
-
-            if roster_doc:
-                roster = roster_doc.get('roster', [])
-                for roster_entry in roster:
-                    roster_player_id = str(roster_entry.get('player_id', ''))
-                    if roster_player_id in player_ids and roster_entry.get('starter', False):
-                        starter_ids.add(roster_player_id)
-            else:
-                # Fallback to players_nba if nba_rosters doesn't exist
-                starter_docs = self._players_dir_repo.find(
-                    {'player_id': {'$in': player_ids}, 'team': team, 'starter': True},
-                    projection={'player_id': 1}
-                )
-                starter_ids = {str(doc['player_id']) for doc in starter_docs}
-            
+            # Use starters from player_filters (already sourced from rosters)
+            starter_ids = set(str(sid) for sid in player_filters.get('starters', []))
             starters = [p for p in player_pers if str(p['player_id']) in starter_ids][:5]
-            logger.debug(f"[PER] {team}: Using {len(starters)} starters from nba_rosters (prediction mode)")
+            logger.debug(f"[PER] {team}: Using {len(starters)} starters from player_filters (prediction mode)")
         else:
             # Training mode: Use historical heuristic (is_starter from aggregated stats)
             starters = [p for p in player_pers if p['is_starter']][:5]
@@ -1826,7 +2024,8 @@ class PERCalculator:
             before_date=before_date,
             player_pers=player_pers,
             starters_set=starters_set,
-            team_games_played=team_games_played
+            team_games_played=team_games_played,
+            game_id=game_id
         )
 
         return {
@@ -1871,11 +2070,12 @@ class PERCalculator:
         game_date: str,
         use_cache: bool = True,
         player_filters: Optional[Dict] = None,
-        injured_players: Optional[Dict] = None
+        injured_players: Optional[Dict] = None,
+        game_id: Optional[str] = None
     ) -> Optional[dict]:
         """
         Get PER-based features for a game prediction.
-        
+
         Args:
             home_team: Home team name
             away_team: Away team name
@@ -1888,35 +2088,39 @@ class PERCalculator:
                 {team: [player_ids]} - List of injured player IDs for each team
                 Training: Should pass stats_nba.{home/away}Team.injured_players
                 Prediction: Should pass injured players from nba_rosters.injured flag
-            
+            game_id: Optional game ID for training mode. When provided, uses cross-team
+                aggregation to include traded players' full season history.
+
         Returns:
             Dict with differential PER features for the matchup
         """
-        # Don't use cache if player filters or injured players are provided (different configuration)
-        if player_filters or injured_players:
+        # Don't use cache if player filters, injured players, or game_id are provided
+        if player_filters or injured_players or game_id:
             use_cache = False
-        
+
         # Check in-memory cache first (only if no filters)
         cache_key = f"{season}|{home_team}|{away_team}|{game_date}"
         if use_cache and cache_key in self._per_features_cache:
             return self._per_features_cache[cache_key]
-        
+
         # Get player filters and injured players for each team
         home_filters = player_filters.get(home_team, {}) if player_filters else None
         away_filters = player_filters.get(away_team, {}) if player_filters else None
         home_injured = injured_players.get(home_team, []) if injured_players else None
         away_injured = injured_players.get(away_team, []) if injured_players else None
-        
+
         # Compute features
         home_per = self.compute_team_per_features(
-            home_team, season, game_date, 
+            home_team, season, game_date,
             player_filters=home_filters,
-            injured_players=home_injured
+            injured_players=home_injured,
+            game_id=game_id
         )
         away_per = self.compute_team_per_features(
             away_team, season, game_date,
             player_filters=away_filters,
-            injured_players=away_injured
+            injured_players=away_injured,
+            game_id=game_id
         )
         
         if not home_per or not away_per:
@@ -2608,38 +2812,46 @@ class PERCalculator:
         player_id: str,
         team: str,
         season: str,
-        before_date: str
+        before_date: str,
+        cross_team: bool = False
     ) -> Optional[float]:
         """
         Get a single player's PER (season-to-date) before a given date.
         Uses cache to avoid recalculating PER for the same player/team/season/date.
-        
+
         Args:
             player_id: Player ID (as string)
             team: Team name
             season: Season string
             before_date: Date string (YYYY-MM-DD) - stats up to but not including this date
-        
+            cross_team: If True, aggregate stats across ALL teams the player played for
+                       (for traded players). Default False for backward compatibility.
+
         Returns:
             Player's PER (float) or None if player not found or insufficient data
         """
         # Check cache first - this is critical for performance when computing PER for many injured players
-        cache_key = (str(player_id), team, season, before_date)
+        cache_key = (str(player_id), team, season, before_date, cross_team)
         if cache_key in self._player_per_cache:
             cached_per = self._player_per_cache[cache_key]
             # Return None if cached value indicates no data (we use None for this)
             return cached_per if cached_per is not None else None
-        
-        # Get all players for the team before the date
-        players = self._get_team_players_before_date_cached(team, season, before_date, min_games=1)
-        
+
+        # Get player data - either cross-team or team-specific
+        if cross_team:
+            # Aggregate stats across ALL teams for traded player support
+            players = self._get_players_cross_team_by_ids([str(player_id)], season, before_date, min_games=1)
+        else:
+            # Get all players for the team before the date
+            players = self._get_team_players_before_date_cached(team, season, before_date, min_games=1)
+
         # Find the specific player
         player_data = None
         for p in players:
             if str(p['_id']) == str(player_id):
                 player_data = p
                 break
-        
+
         if not player_data or player_data['total_min'] == 0:
             # Cache None to indicate no data found
             self._player_per_cache[cache_key] = None

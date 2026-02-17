@@ -67,6 +67,13 @@ season:
   postseason_tournament_game_type: tournament
   playin_text_override: false
 
+extra_features:
+  stats:
+    - conf_wins
+    - same_conf
+    - conf_gp
+    - conf_margin
+
 teams:
   # TODO: provide mapping file or build dynamically from ESPN teams endpoint.
   team_id_map_file: leagues/team_id_maps/cbb_espn_team_id_to_abbrev.json
@@ -437,6 +444,7 @@ pipelines:
       - post_processing:
           refresh_venues: true
           refresh_players: true
+          build_rosters: true
           compute_injuries: true
       - cache_elo: true
       - generate_training:

@@ -5,13 +5,7 @@ import sys
 import os
 sys.path.append(os.getcwd())
 
-from pymongo import MongoClient
-from config import config
-
-class Mongo:
-    def __init__(self):
-        self.client = MongoClient(config["mongo_conn_str"])
-        self.db = self.client.heroku_jrgd55fg
+from bball_app.core.mongo import Mongo
 
 def main():
     print("=== DIRECT ENSEMBLE TRAINING TEST ===")

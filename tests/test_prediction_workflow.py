@@ -30,7 +30,7 @@ def test_prediction_service_initialization():
     print("TEST: PredictionService Initialization")
     print("=" * 60)
 
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     results = []
 
@@ -84,7 +84,7 @@ def test_get_selected_configs():
     print("TEST: Get Selected Configs")
     print("=" * 60)
 
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     results = []
     service = PredictionService()
@@ -129,7 +129,7 @@ def test_load_model_from_config():
     print("TEST: Load Model From Config")
     print("=" * 60)
 
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     results = []
     service = PredictionService()
@@ -165,7 +165,7 @@ def test_predict_game():
     print("TEST: Predict Single Game")
     print("=" * 60)
 
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     results = []
     service = PredictionService()
@@ -214,7 +214,7 @@ def test_matchup_predict_tool():
     print("TEST: Matchup Predict Tool")
     print("=" * 60)
 
-    from nba_app.agents.tools.matchup_predict import predict
+    from bball_app.core.services.matchup_predict import predict
 
     results = []
 
@@ -252,7 +252,7 @@ def test_games_for_date():
     print("TEST: Get Games For Date")
     print("=" * 60)
 
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     results = []
     service = PredictionService()
@@ -278,7 +278,7 @@ def test_feature_extraction_for_prediction():
     print("TEST: Feature Extraction For Prediction")
     print("=" * 60)
 
-    from nba_app.core.models.bball_model import BballModel
+    from bball_app.core.models.bball_model import BballModel
 
     results = []
 
@@ -340,8 +340,8 @@ def test_elo_cache_integration():
     print("TEST: Elo Cache Integration")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.stats.elo_cache import EloCache
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.stats.elo_cache import EloCache
 
     results = []
     db = Mongo().db

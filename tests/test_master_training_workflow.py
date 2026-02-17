@@ -31,8 +31,8 @@ def test_games_query_for_training():
     print("TEST: Query Games For Training")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import GamesRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import GamesRepository
 
     results = []
     db = Mongo().db
@@ -94,7 +94,7 @@ def test_feature_registry():
     print("TEST: Feature Registry")
     print("=" * 60)
 
-    from nba_app.core.features.registry import FeatureRegistry, FeatureGroups
+    from bball_app.core.features.registry import FeatureRegistry, FeatureGroups
 
     results = []
 
@@ -133,8 +133,8 @@ def test_master_training_data_module():
     print("TEST: Master Training Data Module")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.services.training_data import (
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.services.training_data import (
         get_master_training_metadata,
         get_all_possible_features
     )
@@ -179,7 +179,7 @@ def test_nba_model_create_training_data():
     print("TEST: BballModel Create Training Data")
     print("=" * 60)
 
-    from nba_app.core.models.bball_model import BballModel
+    from bball_app.core.models.bball_model import BballModel
     import pandas as pd
 
     results = []
@@ -260,8 +260,8 @@ def test_populate_columns():
     print("TEST: Column Population Logic")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.models.bball_model import BballModel
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.models.bball_model import BballModel
     import pandas as pd
 
     results = []
@@ -325,8 +325,8 @@ def test_points_prediction_columns():
     print("TEST: Points Prediction Columns")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.services.config_manager import ModelConfigManager
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.services.config_manager import ModelConfigManager
 
     results = []
     db = Mongo().db
@@ -356,8 +356,8 @@ def test_game_id_type_handling():
     print("TEST: Game ID Type Handling")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import GamesRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import GamesRepository
     import pandas as pd
 
     results = []
@@ -399,8 +399,8 @@ def test_venue_guid_lookup():
     print("TEST: Venue GUID Lookup")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import GamesRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import GamesRepository
 
     results = []
     db = Mongo().db

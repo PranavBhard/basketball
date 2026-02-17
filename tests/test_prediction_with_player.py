@@ -11,7 +11,7 @@ import os
 from datetime import datetime, date
 
 # Add parent of nba_app to path for imports
-# This allows imports like "from nba_app.core.mongo import Mongo"
+# This allows imports like "from bball_app.core.mongo import Mongo"
 # Script is in nba_app/tests/, so we need to go up to the parent of nba_app/
 script_dir = os.path.dirname(os.path.abspath(__file__))  # nba_app/tests/
 nba_app_dir = os.path.dirname(script_dir)  # nba_app/
@@ -19,11 +19,11 @@ project_root = os.path.dirname(nba_app_dir)  # Parent of nba_app/
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.models.bball_model import BballModel
-from nba_app.core.training.model_factory import create_model_with_c
-from nba_app.core.services.training_data import get_all_possible_features
-from nba_app.web.app import load_model_from_mongo_config
+from bball_app.core.mongo import Mongo
+from bball_app.core.models.bball_model import BballModel
+from bball_app.core.training.model_factory import create_model_with_c
+from bball_app.core.services.training_data import get_all_possible_features
+from bball_app.web.app import load_model_from_mongo_config
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler

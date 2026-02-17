@@ -30,9 +30,9 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.stats.handler import StatHandlerV2
-from nba_app.core.models.bball_model import BballModel
+from bball_app.core.mongo import Mongo
+from bball_app.core.stats.handler import StatHandlerV2
+from bball_app.core.models.bball_model import BballModel
 
 
 def test_travel_features():

@@ -28,10 +28,10 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from pymongo import ASCENDING, DESCENDING
 from pymongo.database import Database
 
-from nba_app.core.data import GamesRepository
+from bball_app.core.data import GamesRepository
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 # MongoDB collection name
@@ -48,8 +48,8 @@ class EloCache:
     Manages Elo rating computation and caching in MongoDB.
 
     Usage:
-        from nba_app.core.stats.elo_cache import EloCache
-        from nba_app.core.mongo import Mongo
+        from bball_app.core.stats.elo_cache import EloCache
+        from bball_app.core.mongo import Mongo
 
         mongo = Mongo()
         elo_cache = EloCache(mongo.db)
@@ -578,7 +578,7 @@ def get_elo_cache(db: Database = None) -> EloCache:
         EloCache instance
     """
     if db is None:
-        from nba_app.core.mongo import Mongo
+        from bball_app.core.mongo import Mongo
         db = Mongo().db
 
     return EloCache(db)

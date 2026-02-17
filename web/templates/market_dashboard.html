@@ -400,6 +400,37 @@ function formatPercent(value) {
     return (value >= 0 ? '+' : '') + value.toFixed(2) + '%';
 }
 
+function renderFillRow(fill) {
+    const date = new Date(fill.created_time).toLocaleDateString();
+    const side = (fill.side || '').toUpperCase();
+    const action = (fill.action || 'buy').toUpperCase();
+    return `
+        <tr>
+            <td>${date}</td>
+            <td><span class="ticker">${fill.ticker}</span></td>
+            <td>${action} ${side}</td>
+            <td>${fill.count}</td>
+            <td>${fill.price}c</td>
+            <td>${formatCurrency(fill.cost)}</td>
+        </tr>
+    `;
+}
+
+function renderSettlementRow(s) {
+    const date = new Date(s.settled_time).toLocaleDateString();
+    const pnl = s.pnl != null ? s.pnl : (s.revenue || 0);
+    const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+    const result = pnl > 0 ? 'Won' : pnl < 0 ? 'Lost' : 'Break Even';
+    return `
+        <tr>
+            <td>${date}</td>
+            <td><span class="ticker">${s.ticker}</span></td>
+            <td class="${pnlClass}">${result}</td>
+            <td class="${pnlClass}">${formatCurrency(pnl)}</td>
+        </tr>
+    `;
+}
+
 async function loadDashboardData() {
     const content = document.getElementById('dashboard-content');
     content.innerHTML = `
@@ -579,41 +610,13 @@ function renderDashboard(data) {
     // Populate fills table
     const fillsBody = document.getElementById('fills-table-body');
     if (fills.length > 0) {
-        fillsBody.innerHTML = fills.map(fill => {
-            const date = new Date(fill.created_time).toLocaleDateString();
-            const side = fill.side.toUpperCase();
-            const action = fill.action;
-            const cost = fill.count * fill.price;
-            return `
-                <tr>
-                    <td>${date}</td>
-                    <td><span class="ticker">${fill.ticker}</span></td>
-                    <td>${action} ${side}</td>
-                    <td>${fill.count}</td>
-                    <td>${fill.price}c</td>
-                    <td>${formatCurrency(cost)}</td>
-                </tr>
-            `;
-        }).join('');
+        fillsBody.innerHTML = fills.map(renderFillRow).join('');
     }
 
     // Populate settlements table
     const settlementsBody = document.getElementById('settlements-table-body');
     if (settlements.length > 0) {
-        settlementsBody.innerHTML = settlements.map(s => {
-            const date = new Date(s.settled_time).toLocaleDateString();
-            const pnl = s._pnl || 0;
-            const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-            const result = pnl >= 0 ? 'Won' : 'Lost';
-            return `
-                <tr>
-                    <td>${date}</td>
-                    <td><span class="ticker">${s.ticker}</span></td>
-                    <td class="${pnlClass}">${result}</td>
-                    <td class="${pnlClass}">${formatCurrency(pnl)}</td>
-                </tr>
-            `;
-        }).join('');
+        settlementsBody.innerHTML = settlements.map(renderSettlementRow).join('');
     }
 
     // Render cumulative returns chart
@@ -664,23 +667,7 @@ async function loadMoreFills() {
         document.getElementById('fills-loading')?.remove();
 
         if (data.success && data.fills && data.fills.length > 0) {
-            const newRows = data.fills.map(fill => {
-                const date = new Date(fill.created_time).toLocaleDateString();
-                const side = fill.side.toUpperCase();
-                const action = fill.action;
-                const cost = fill.count * fill.price;
-                return `
-                    <tr>
-                        <td>${date}</td>
-                        <td><span class="ticker">${fill.ticker}</span></td>
-                        <td>${action} ${side}</td>
-                        <td>${fill.count}</td>
-                        <td>${fill.price}c</td>
-                        <td>${formatCurrency(cost)}</td>
-                    </tr>
-                `;
-            }).join('');
-            tbody.insertAdjacentHTML('beforeend', newRows);
+            tbody.insertAdjacentHTML('beforeend', data.fills.map(renderFillRow).join(''));
 
             fillsCursor = data.cursor || null;
             hasMoreFills = !!fillsCursor;
@@ -709,21 +696,7 @@ async function loadMoreSettlements() {
         document.getElementById('settlements-loading')?.remove();
 
         if (data.success && data.settlements && data.settlements.length > 0) {
-            const newRows = data.settlements.map(s => {
-                const date = new Date(s.settled_time).toLocaleDateString();
-                const pnl = s._pnl || 0;
-                const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-                const result = pnl >= 0 ? 'Won' : 'Lost';
-                return `
-                    <tr>
-                        <td>${date}</td>
-                        <td><span class="ticker">${s.ticker}</span></td>
-                        <td class="${pnlClass}">${result}</td>
-                        <td class="${pnlClass}">${formatCurrency(pnl)}</td>
-                    </tr>
-                `;
-            }).join('');
-            tbody.insertAdjacentHTML('beforeend', newRows);
+            tbody.insertAdjacentHTML('beforeend', data.settlements.map(renderSettlementRow).join(''));
 
             settlementsCursor = data.cursor || null;
             hasMoreSettlements = !!settlementsCursor;
@@ -816,42 +789,8 @@ async function loadMoreModal() {
         const items = modalType === 'fills' ? data.fills : data.settlements;
 
         if (data.success && items && items.length > 0) {
-            let newRows;
-            if (modalType === 'fills') {
-                newRows = items.map(fill => {
-                    const date = new Date(fill.created_time).toLocaleDateString();
-                    const side = fill.side.toUpperCase();
-                    const action = fill.action;
-                    const cost = fill.count * fill.price;
-                    return `
-                        <tr>
-                            <td>${date}</td>
-                            <td><span class="ticker">${fill.ticker}</span></td>
-                            <td>${action} ${side}</td>
-                            <td>${fill.count}</td>
-                            <td>${fill.price}c</td>
-                            <td>${formatCurrency(cost)}</td>
-                        </tr>
-                    `;
-                }).join('');
-            } else {
-                newRows = items.map(s => {
-                    const date = new Date(s.settled_time).toLocaleDateString();
-                    const pnl = s._pnl || 0;
-                    const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-                    const result = pnl >= 0 ? 'Won' : 'Lost';
-                    return `
-                        <tr>
-                            <td>${date}</td>
-                            <td><span class="ticker">${s.ticker}</span></td>
-                            <td class="${pnlClass}">${result}</td>
-                            <td class="${pnlClass}">${formatCurrency(pnl)}</td>
-                        </tr>
-                    `;
-                }).join('');
-            }
-
-            tbody.insertAdjacentHTML('beforeend', newRows);
+            const renderFn = modalType === 'fills' ? renderFillRow : renderSettlementRow;
+            tbody.insertAdjacentHTML('beforeend', items.map(renderFn).join(''));
             modalCursor = data.cursor || null;
             modalHasMore = !!modalCursor;
         } else {

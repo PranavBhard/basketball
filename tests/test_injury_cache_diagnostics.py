@@ -26,9 +26,9 @@ if project_root not in sys.path:
 
 
 def main() -> int:
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.stats.handler import StatHandlerV2
-    from nba_app.core.utils.collection import import_collection
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.stats.handler import StatHandlerV2
+    from bball_app.core.utils.collection import import_collection
 
     try:
         mongo = Mongo()

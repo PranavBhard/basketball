@@ -30,8 +30,8 @@ Architecture:
              └── ESPNClient (ESPN NBA API)
 
 Usage:
-    from nba_app.core.data import GamesRepository, ESPNClient
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.data import GamesRepository, ESPNClient
+    from bball_app.core.mongo import Mongo
 
     db = Mongo().db
     games_repo = GamesRepository(db)

@@ -11,13 +11,13 @@ from datetime import datetime
 from .base import BaseRepository
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 class PlayerStatsRepository(BaseRepository):
     """Repository for stats_nba_players collection (per-game player stats)."""
 
-    collection_name = 'stats_nba_players'
+    collection_name = 'nba_player_stats'
 
     def __init__(
         self,
@@ -168,7 +168,7 @@ class PlayerStatsRepository(BaseRepository):
 class PlayersRepository(BaseRepository):
     """Repository for players_nba collection (player directory)."""
 
-    collection_name = 'players_nba'
+    collection_name = 'nba_players'
 
     def __init__(
         self,

@@ -34,7 +34,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from nba_app.core.league_config import load_league_config, LeagueConfig
+from bball_app.core.league_config import load_league_config, LeagueConfig
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ class NewsService:
             return self._id_maps_cache[map_file]
 
         # Try multiple path resolutions
-        from nba_app.core.league_config import _repo_root
+        from bball_app.core.league_config import _repo_root
 
         # nba_app directory
         nba_app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -478,7 +478,7 @@ class NewsService:
             )
 
         try:
-            from nba_app.core.services.webpage_parser import WebpageParser
+            from bball_app.core.services.webpage_parser import WebpageParser
             content = WebpageParser.extract_from_url(url, timeout=self.timeout)
 
             return FetchResult(

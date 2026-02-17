@@ -29,7 +29,7 @@ from enum import Enum
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nba_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
+from bball_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
 
 
 class Phase(Enum):

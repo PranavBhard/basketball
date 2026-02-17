@@ -29,7 +29,7 @@ def test_mongo_connection():
     print("TEST: MongoDB Connection")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.mongo import Mongo
 
     try:
         mongo = Mongo()
@@ -59,8 +59,8 @@ def test_games_repository():
     print("TEST: GamesRepository")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import GamesRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import GamesRepository
 
     results = []
     db = Mongo().db
@@ -120,8 +120,8 @@ def test_player_stats_repository():
     print("TEST: PlayerStatsRepository")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import PlayerStatsRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import PlayerStatsRepository
 
     results = []
     db = Mongo().db
@@ -157,8 +157,8 @@ def test_classifier_config_repository():
     print("TEST: ClassifierConfigRepository")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import ClassifierConfigRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import ClassifierConfigRepository
 
     results = []
     db = Mongo().db
@@ -200,8 +200,8 @@ def test_points_config_repository():
     print("TEST: PointsConfigRepository")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import PointsConfigRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import PointsConfigRepository
 
     results = []
     db = Mongo().db
@@ -235,8 +235,8 @@ def test_experiment_runs_repository():
     print("TEST: ExperimentRunsRepository")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import ExperimentRunsRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import ExperimentRunsRepository
 
     results = []
     db = Mongo().db
@@ -267,8 +267,8 @@ def test_rosters_repository():
     print("TEST: RostersRepository")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import RostersRepository
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import RostersRepository
 
     results = []
     db = Mongo().db
@@ -291,8 +291,8 @@ def test_league_stats_cache():
     print("TEST: LeagueStatsCache")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.data import LeagueStatsCache
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.data import LeagueStatsCache
 
     results = []
     db = Mongo().db

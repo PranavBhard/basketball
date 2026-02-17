@@ -9,12 +9,12 @@ This script:
 4. Updates the players collection
 
 Usage:
-    python -m nba_app.cli.scripts.backfill_player_metadata <league>
-    python -m nba_app.cli.scripts.backfill_player_metadata nba
-    python -m nba_app.cli.scripts.backfill_player_metadata cbb
-    python -m nba_app.cli.scripts.backfill_player_metadata cbb --dry-run
-    python -m nba_app.cli.scripts.backfill_player_metadata cbb --limit 100
-    python -m nba_app.cli.scripts.backfill_player_metadata nba --season 2024-2025
+    python -m bball_app.cli.scripts.backfill_player_metadata <league>
+    python -m bball_app.cli.scripts.backfill_player_metadata nba
+    python -m bball_app.cli.scripts.backfill_player_metadata cbb
+    python -m bball_app.cli.scripts.backfill_player_metadata cbb --dry-run
+    python -m bball_app.cli.scripts.backfill_player_metadata cbb --limit 100
+    python -m bball_app.cli.scripts.backfill_player_metadata nba --season 2024-2025
 """
 
 import argparse
@@ -30,8 +30,8 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.league_config import load_league_config
+from bball_app.core.mongo import Mongo
+from bball_app.core.league_config import load_league_config
 
 
 def fetch_player_from_espn(player_id: str, sport_path: str) -> dict:
@@ -103,13 +103,13 @@ def backfill_player_metadata(league_id: str, dry_run: bool = False, limit: int =
     db = Mongo().db
 
     # Get collection names and ESPN config from league config
-    players_collection = league.collections.get('players', 'players_nba')
+    players_collection = league.collections.get('players', 'nba_players')
     rosters_collection = league.collections.get('rosters', 'nba_rosters')
     sport_path = league.espn.get('sport_path', 'nba')
 
     # Determine season
     if not season:
-        from nba_app.core.utils import get_season_from_date
+        from bball_app.core.utils import get_season_from_date
         from datetime import date
         season = get_season_from_date(date.today(), league=league)
 

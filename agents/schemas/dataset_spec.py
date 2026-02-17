@@ -1,9 +1,11 @@
 """
+DEPRECATED: This module is a backward-compatibility shim.
+Please import from bball_app.core.training.schemas instead.
+
 Dataset Specification Schema
-Re-exported from experiment_config for convenience
 """
 
-from nba_app.agents.schemas.experiment_config import DatasetSpec
+from bball_app.core.training.schemas import DatasetSpec
 
 __all__ = ['DatasetSpec']
 

@@ -8,10 +8,10 @@ League-aware through LeagueConfig.
 from datetime import date, datetime
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
-from nba_app.core.utils import get_season_from_date
+from bball_app.core.utils import get_season_from_date
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 def get_position_sort_order(pos_name: str) -> int:
@@ -29,7 +29,7 @@ def get_position_sort_order(pos_name: str) -> int:
 
 
 def calculate_player_stats(db, player_id: str, team: str, season: str, before_date: str,
-                          player_stats_collection: str = 'stats_nba_players',
+                          player_stats_collection: str = 'nba_player_stats',
                           exclude_game_types: List[str] = None) -> Dict:
     """Calculate player stats for display."""
     # Handle both string and int player_ids
@@ -107,8 +107,8 @@ def get_team_players(db, team: str, season: str, game_date: date,
         List of player dictionaries with roster info and stats
     """
     rosters_collection = league.collections.get('rosters', 'nba_rosters')
-    players_collection = league.collections.get('players', 'players_nba')
-    player_stats_collection = league.collections.get('player_stats', 'stats_nba_players')
+    players_collection = league.collections.get('players', 'nba_players')
+    player_stats_collection = league.collections.get('player_stats', 'nba_player_stats')
 
     before_date = game_date.strftime('%Y-%m-%d')
     result = []
@@ -173,6 +173,9 @@ def get_team_players(db, team: str, season: str, game_date: date,
         else:
             is_injured = False
 
+        # Get disabled flag from roster (user-toggled exclusion from predictions)
+        is_disabled = roster_entry.get('disabled', False)
+
         # Calculate stats (exclude preseason/allstar based on league config)
         exclude_game_types = league.exclude_game_types if hasattr(league, 'exclude_game_types') else []
         stats = calculate_player_stats(db, player_id, team, season, before_date, player_stats_collection, exclude_game_types)
@@ -191,6 +194,7 @@ def get_team_players(db, team: str, season: str, game_date: date,
             'injured': is_injured,
             'injury_status': player_doc.get('injury_status'),
             'starter': is_starter,
+            'disabled': is_disabled,
             'stats': stats
         })
 
@@ -207,15 +211,17 @@ def get_team_players(db, team: str, season: str, game_date: date,
 
 def get_team_info(db, team: str, league: "LeagueConfig") -> Dict:
     """Get team logo and colors from teams collection."""
-    teams_collection = league.collections.get('teams', 'teams_nba')
+    teams_collection = league.collections.get('teams', 'nba_teams')
 
     # Query by the league's primary identifier field
     # NBA uses abbreviation, CBB uses team_id
     if league.team_primary_identifier == 'id':
-        # CBB: team is the ESPN team_id
+        # CBB: team is the ESPN team_id, but fall back to abbreviation lookup
+        # since game docs may only have the abbreviation (stored as 'name')
         team_data = db[teams_collection].find_one({'id': team}) or \
                     db[teams_collection].find_one({'team_id': team}) or \
-                    db[teams_collection].find_one({'id': str(team)}) or {}
+                    db[teams_collection].find_one({'id': str(team)}) or \
+                    db[teams_collection].find_one({'abbreviation': team}) or {}
     else:
         # NBA: team is the abbreviation
         team_data = db[teams_collection].find_one({'abbreviation': team}) or {}
@@ -257,12 +263,18 @@ def get_game_detail(db, game_id: str, game_date: Optional[date],
         return {'success': False, 'error': 'Game not found'}
 
     # Get team identifier based on league config (NBA uses 'name'/abbreviation, CBB uses 'id')
-    # Fall back to 'name' if the primary identifier field is not present in the game document
+    # Fall back to 'team_id' then 'name' if the primary identifier field is not present
     team_id_field = league.team_primary_identifier  # 'name' or 'id'
     home_team = game.get('homeTeam', {}).get(team_id_field, '')
     away_team = game.get('awayTeam', {}).get(team_id_field, '')
 
-    # Fallback to 'name' if primary identifier not found (common for CBB games that only have name)
+    # Fallback: CBB game docs store 'team_id' not 'id', so try that next
+    if not home_team:
+        home_team = game.get('homeTeam', {}).get('team_id', '')
+    if not away_team:
+        away_team = game.get('awayTeam', {}).get('team_id', '')
+
+    # Final fallback to 'name' (abbreviation) if no numeric id found
     if not home_team:
         home_team = game.get('homeTeam', {}).get('name', '')
     if not away_team:
@@ -480,8 +492,8 @@ def get_player_detail(db, player_id: str, team: str, season: str, game_date: dat
     Returns:
         Dictionary with player details and stats
     """
-    players_collection = league.collections.get('players', 'players_nba')
-    player_stats_collection = league.collections.get('player_stats', 'stats_nba_players')
+    players_collection = league.collections.get('players', 'nba_players')
+    player_stats_collection = league.collections.get('player_stats', 'nba_player_stats')
 
     before_date = game_date.strftime('%Y-%m-%d')
     exclude_game_types = league.exclude_game_types if hasattr(league, 'exclude_game_types') else []
@@ -545,14 +557,15 @@ def get_player_per(db, player_id: str, team: str, season: str, game_date: date,
     Returns:
         Dictionary with player PER
     """
-    from nba_app.core.stats.per_calculator import PERCalculator
+    from bball_app.core.stats.per_calculator import PERCalculator
 
     before_date = game_date.strftime('%Y-%m-%d')
 
     try:
         # Only preload the specific season, not all seasons
         per_calc = PERCalculator(db, league=league, preload_seasons=[season])
-        per_value = per_calc.get_player_per_before_date(player_id, team, season, before_date)
+        # Use cross_team=True to include stats from all teams (for traded players)
+        per_value = per_calc.get_player_per_before_date(player_id, team, season, before_date, cross_team=True)
 
         return {
             'success': True,
@@ -583,7 +596,7 @@ def get_players_per_batch(db, players: List[Dict], season: str, game_date: date,
     Returns:
         Dictionary mapping player_id to PER value (or None if not available)
     """
-    from nba_app.core.stats.per_calculator import PERCalculator
+    from bball_app.core.stats.per_calculator import PERCalculator
 
     before_date = game_date.strftime('%Y-%m-%d')
     result = {}
@@ -600,7 +613,8 @@ def get_players_per_batch(db, players: List[Dict], season: str, game_date: date,
                 continue
 
             try:
-                per_value = per_calc.get_player_per_before_date(player_id, team, season, before_date)
+                # Use cross_team=True to include stats from all teams (for traded players)
+                per_value = per_calc.get_player_per_before_date(player_id, team, season, before_date, cross_team=True)
                 result[player_id] = round(per_value, 1) if per_value is not None else None
             except Exception:
                 result[player_id] = None
@@ -630,7 +644,7 @@ def search_players_for_roster(db, query: str, season: str,
         List of player dicts with player_id, player_name, team, headshot,
         pos_name, pos_display_name, games
     """
-    from nba_app.core.data.players import PlayerStatsRepository, PlayersRepository
+    from bball_app.core.data.players import PlayerStatsRepository, PlayersRepository
 
     if len(query) < 2:
         return []
@@ -709,13 +723,13 @@ def add_player_to_team_roster(db, player_id: str, team: str, season: str,
     Returns:
         Dict with 'success' bool and 'player' object (or 'error' string)
     """
-    from nba_app.core.data.rosters import RostersRepository
-    from nba_app.core.data.players import PlayersRepository
+    from bball_app.core.data.rosters import RostersRepository
+    from bball_app.core.data.players import PlayersRepository
 
     rosters_repo = RostersRepository(db, league=league)
     players_repo = PlayersRepository(db, league=league)
 
-    player_stats_collection = league.collections.get('player_stats', 'stats_nba_players')
+    player_stats_collection = league.collections.get('player_stats', 'nba_player_stats')
     exclude_game_types = league.exclude_game_types if hasattr(league, 'exclude_game_types') else []
 
     # Remove player from all teams' rosters for this season
@@ -759,3 +773,71 @@ def add_player_to_team_roster(db, player_id: str, team: str, season: str,
     }
 
     return {'success': True, 'player': player_obj}
+
+
+def move_player_to_team(db, player_id: str, to_team: str, season: str,
+                        league: "LeagueConfig") -> Dict:
+    """
+    Move a player from their current team to a new team.
+
+    Steps:
+    1. Find player's current roster entry (to preserve injured/disabled flags)
+    2. Remove from ALL team rosters for the season
+    3. Add to target team with preserved injured/disabled flags, starter=False
+    4. Update players collection team field
+
+    Args:
+        db: MongoDB database instance
+        player_id: Player ID string
+        to_team: Target team identifier
+        season: Season string
+        league: LeagueConfig for collection names
+
+    Returns:
+        Dict with 'success' bool and 'message' (or 'error' string)
+    """
+    from bball_app.core.data.rosters import RostersRepository
+    from bball_app.core.data.players import PlayersRepository
+
+    rosters_repo = RostersRepository(db, league=league)
+    players_repo = PlayersRepository(db, league=league)
+
+    pid_str = str(player_id)
+
+    # Find current roster entry to preserve flags
+    source_entry = None
+    all_rosters = rosters_repo.find_by_season(season)
+    for roster_doc in all_rosters:
+        for entry in roster_doc.get('roster', []):
+            if str(entry.get('player_id', '')) == pid_str:
+                source_entry = entry.copy()
+                break
+        if source_entry:
+            break
+
+    # Remove from ALL team rosters for the season
+    for roster_doc in all_rosters:
+        roster_team = roster_doc.get('team')
+        rosters_repo.remove_player_from_roster(roster_team, season, pid_str)
+
+    # Build new roster entry preserving injured/disabled flags, reset starter
+    new_entry = {
+        'player_id': pid_str,
+        'starter': False,
+        'injured': source_entry.get('injured', False) if source_entry else False,
+        'disabled': source_entry.get('disabled', False) if source_entry else False,
+    }
+    # Preserve player_name if it was on the source entry
+    if source_entry and source_entry.get('player_name'):
+        new_entry['player_name'] = source_entry['player_name']
+
+    rosters_repo.add_player_to_roster(to_team, season, new_entry)
+
+    # Update players collection team field
+    players_repo.upsert_player(player_id, {
+        'player_id': player_id,
+        'team': to_team,
+        'last_roster_update': datetime.utcnow()
+    })
+
+    return {'success': True, 'message': f'Player {pid_str} moved to {to_team}'}

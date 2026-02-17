@@ -31,7 +31,7 @@ def test_nba_model_initialization():
     print("TEST: BballModel Initialization")
     print("=" * 60)
 
-    from nba_app.core.models.bball_model import BballModel
+    from bball_app.core.models.bball_model import BballModel
 
     results = []
 
@@ -96,8 +96,8 @@ def test_feature_calculation():
     print("TEST: Feature Calculation")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.stats.handler import StatHandlerV2
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.stats.handler import StatHandlerV2
 
     results = []
     db = Mongo().db
@@ -145,16 +145,16 @@ def test_feature_calculation():
         print(f"     FAIL: Net feature calculation failed: {e}")
         results.append(('feature_calc_net', False))
 
-    # Test 4: Calculate blend feature
+    # Test 4: Calculate blend feature (composite time_period format)
     print("\n  4. Testing blend feature calculation...")
     try:
         feature_value = sh.calculate_feature(
-            'wins_blend|default|blend|diff',
+            'wins|blend:season:0.80/games_12:0.20|avg|diff',
             'LAL', 'BOS', '2023-2024', 2024, 1, 15
         )
         is_valid = isinstance(feature_value, (int, float))
         status = "PASS" if is_valid else "FAIL"
-        print(f"     {status}: wins_blend|default|blend|diff = {feature_value:.4f}")
+        print(f"     {status}: wins|blend:season:0.80/games_12:0.20|avg|diff = {feature_value:.4f}")
         results.append(('feature_calc_blend', is_valid))
     except Exception as e:
         print(f"     FAIL: Blend feature calculation failed: {e}")
@@ -169,7 +169,7 @@ def test_build_features_dict():
     print("TEST: Build Features Dict")
     print("=" * 60)
 
-    from nba_app.core.models.bball_model import BballModel
+    from bball_app.core.models.bball_model import BballModel
 
     results = []
 
@@ -229,7 +229,7 @@ def test_create_training_data():
     print("TEST: Create Training Data")
     print("=" * 60)
 
-    from nba_app.core.models.bball_model import BballModel
+    from bball_app.core.models.bball_model import BballModel
     import pandas as pd
 
     results = []
@@ -297,37 +297,37 @@ def test_create_training_data():
 
 
 def test_model_factory():
-    """Test ModelFactory for model creation."""
+    """Test ArtifactLoader for model creation."""
     print("\n" + "=" * 60)
-    print("TEST: ModelFactory")
+    print("TEST: ArtifactLoader")
     print("=" * 60)
 
-    from nba_app.core.models.factory import ModelFactory
+    from bball_app.core.models.artifact_loader import ArtifactLoader
 
     results = []
 
     # Test 1: Create LogisticRegression model
     print("\n  1. Testing create_sklearn_model() for LogisticRegression...")
     try:
-        model = ModelFactory.create_sklearn_model('LogisticRegression', c_value=0.1)
+        model = ArtifactLoader.create_sklearn_model('LogisticRegression', c_value=0.1)
         is_valid = model is not None and hasattr(model, 'fit')
         status = "PASS" if is_valid else "FAIL"
         print(f"     {status}: Created LogisticRegression model")
         results.append(('model_factory_lr', is_valid))
     except Exception as e:
-        print(f"     FAIL: ModelFactory failed: {e}")
+        print(f"     FAIL: ArtifactLoader failed: {e}")
         results.append(('model_factory_lr', False))
 
     # Test 2: Create GradientBoosting model
     print("\n  2. Testing create_sklearn_model() for GradientBoosting...")
     try:
-        model = ModelFactory.create_sklearn_model('GradientBoosting')
+        model = ArtifactLoader.create_sklearn_model('GradientBoosting')
         is_valid = model is not None and hasattr(model, 'fit')
         status = "PASS" if is_valid else "FAIL"
         print(f"     {status}: Created GradientBoosting model")
         results.append(('model_factory_gb', is_valid))
     except Exception as e:
-        print(f"     FAIL: ModelFactory failed: {e}")
+        print(f"     FAIL: ArtifactLoader failed: {e}")
         results.append(('model_factory_gb', False))
 
     return results
@@ -339,8 +339,8 @@ def test_config_manager():
     print("TEST: ModelConfigManager")
     print("=" * 60)
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.services.config_manager import ModelConfigManager
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.services.config_manager import ModelConfigManager
 
     results = []
     db = Mongo().db

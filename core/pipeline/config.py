@@ -10,7 +10,7 @@ The league YAML files can include a `pipelines` section that configures:
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Set
 
-from nba_app.core.league_config import LeagueConfig
+from bball_app.core.league_config import LeagueConfig
 
 
 # Valid data types for sync pipeline
@@ -84,7 +84,9 @@ class PipelineConfig:
     # Post-processing settings
     refresh_venues: bool = True
     refresh_players: bool = True
+    refresh_teams: bool = True
     compute_injuries: bool = True
+    build_rosters: bool = True
 
     # Training settings
     training: TrainingConfig = field(default_factory=TrainingConfig)
@@ -173,7 +175,9 @@ class PipelineConfig:
             espn_max_workers=espn_config.get('max_workers', 4),
             refresh_venues=post_config.get('refresh_venues', True),
             refresh_players=post_config.get('refresh_players', True),
+            refresh_teams=post_config.get('refresh_teams', True),
             compute_injuries=post_config.get('compute_injuries', True),
+            build_rosters=post_config.get('build_rosters', True),
             training=training,
             cache_elo=cache_elo_val,
             register_csv=register_csv_val,

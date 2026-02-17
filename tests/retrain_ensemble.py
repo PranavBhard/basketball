@@ -3,23 +3,22 @@
 
 import sys
 import os
-sys.path.append(os.getcwd())
+
+# Add project root to path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+bball_app_dir = os.path.dirname(script_dir)
+project_root = os.path.dirname(bball_app_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 import requests
 import json
 
+from bball_app.core.mongo import Mongo
+
 def main():
     print("=== RETRAINING ENSEMBLE TO TEST PRED_MARGIN FIX ===")
-    
-    # Get current ensemble config
-    from pymongo import MongoClient
-    from config import config
-    
-    class Mongo:
-        def __init__(self):
-            self.client = MongoClient(config["mongo_conn_str"])
-            self.db = self.client.heroku_jrgd55fg
-    
+
     mongo = Mongo()
     selected_config = mongo.db.model_config_nba.find_one({'selected': True})
     

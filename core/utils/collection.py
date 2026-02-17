@@ -6,7 +6,7 @@ for fast in-memory lookups during batch processing.
 """
 
 from pprint import pprint
-from nba_app.core.mongo import Mongo
+from bball_app.core.mongo import Mongo
 
 # Lazy initialization - connection created on first use
 _mongo = None

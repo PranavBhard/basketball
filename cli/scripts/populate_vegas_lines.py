@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Tuple
 import sys
 
 from pymongo import UpdateOne
-from nba_app.core.mongo import Mongo
+from bball_app.core.mongo import Mongo
 
 
 # Team abbreviation mapping: CSV (lowercase) -> DB (uppercase)

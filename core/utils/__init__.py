@@ -13,23 +13,23 @@ Submodules:
 from datetime import date, datetime
 from typing import Optional, Union
 
-from nba_app.core.league_config import LeagueConfig, load_league_config
+from bball_app.core.league_config import LeagueConfig, load_league_config
 
 # Collection utilities
-from nba_app.core.utils.collection import import_collection
+from bball_app.core.utils.collection import import_collection
 
 # Database query functions
-from nba_app.core.utils.db_queries import (
+from bball_app.core.utils.db_queries import (
     getTeamSeasonGamesFromDate,
     getTeamLastNMonthsSeasonGames,
     getTeamLastNDaysSeasonGames,
 )
 
 # Player utilities
-from nba_app.core.utils.players import build_player_lists_for_prediction
+from bball_app.core.utils.players import build_player_lists_for_prediction
 
 # ESPN audit tools
-from nba_app.core.utils.espn_audit import (
+from bball_app.core.utils.espn_audit import (
     run_espn_vs_db_audit,
     fetch_espn_games_for_date_range,
     filter_games_for_team,
@@ -79,6 +79,14 @@ def get_season_from_date(
         return f"{game_date.year - 1}-{game_date.year}"
 
 
+def build_time_suffix(begin_year: int, calibration_years: list, evaluation_year: int) -> str:
+    """Build time config suffix like 'T10C212223E24'."""
+    begin_yy = str(begin_year % 100).zfill(2)
+    cal_yy = ''.join(str(y % 100).zfill(2) for y in sorted(calibration_years))
+    eval_yy = str(evaluation_year % 100).zfill(2)
+    return f"T{begin_yy}C{cal_yy}E{eval_yy}"
+
+
 __all__ = [
     # Collection
     'import_collection',
@@ -94,4 +102,6 @@ __all__ = [
     'filter_games_for_team',
     # Season calculation
     'get_season_from_date',
+    # Time suffix
+    'build_time_suffix',
 ]

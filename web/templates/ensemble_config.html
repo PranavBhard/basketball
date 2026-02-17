@@ -171,9 +171,158 @@
                     <div id="job-progress-message" style="margin-top: 10px; color: #666; font-size: 0.9em;">Initializing...</div>
                     <div id="job-error" style="display: none; margin-top: 10px; padding: 10px; background: #fee; border: 1px solid #fcc; border-radius: 4px; color: #c33;"></div>
                 </div>
+                <!-- Calibration Modal -->
+                <div id="calibration-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+                    <div style="background: white; border-radius: 8px; padding: 25px; max-width: 480px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
+                        <h3 style="margin: 0 0 20px 0; color: #333;">Update Time Calibration</h3>
+                        <input type="hidden" id="cal-modal-ensemble-id">
+
+                        <div class="form-group">
+                            <label for="cal-method">Calibration Method:</label>
+                            <select id="cal-method" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                                <option value="isotonic">Isotonic</option>
+                                <option value="sigmoid">Sigmoid</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cal-begin-year">Begin Year:</label>
+                            <input type="number" id="cal-begin-year" min="2007" max="2030" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cal-years">Calibration Years (comma-separated):</label>
+                            <input type="text" id="cal-years" placeholder="e.g. 2021, 2022, 2023" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cal-eval-year">Evaluation Year:</label>
+                            <input type="number" id="cal-eval-year" min="2007" max="2030" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cal-exclude">Exclude Seasons (comma-separated, optional):</label>
+                            <input type="text" id="cal-exclude" placeholder="e.g. 2020" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cal-min-games">Min Games Played:</label>
+                            <input type="number" id="cal-min-games" min="0" max="100" step="1" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;" title="Minimum games each team must have played before a game is included in training data">
+                        </div>
+
+                        <div style="display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="closeCalibrationModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="submitCalibrationUpdate()">Apply & Retrain</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="ensembles-loading" class="loading" style="display: none;">Loading ensembles...</div>
                 <div id="ensembles-list"></div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Base Model Modal -->
+<div id="edit-base-model-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:2000; overflow-y:auto;">
+    <div style="background:white; max-width:900px; margin:30px auto; border-radius:10px; box-shadow:0 12px 48px rgba(0,0,0,0.25); display:flex; flex-direction:column; max-height:calc(100vh - 60px);">
+        <!-- Header -->
+        <div style="padding:20px 25px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+            <h3 style="margin:0; color:#333;">Edit Base Model</h3>
+            <button onclick="closeEditBaseModelModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666; padding:0 5px;">&times;</button>
+        </div>
+
+        <!-- Scrollable body -->
+        <div style="padding:25px; overflow-y:auto; flex:1;">
+            <input type="hidden" id="edit-bm-ensemble-id">
+            <input type="hidden" id="edit-bm-model-id">
+
+            <!-- Name -->
+            <div class="form-group">
+                <label for="edit-bm-name">Name:</label>
+                <input type="text" id="edit-bm-name" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+            </div>
+
+            <!-- Model Type -->
+            <div class="form-group">
+                <label for="edit-bm-model-type">Model Type:</label>
+                <select id="edit-bm-model-type" onchange="onEditBmModelTypeChange()" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                    <option value="LogisticRegression">Logistic Regression</option>
+                    <option value="GradientBoosting">Gradient Boosting</option>
+                    <option value="SVM">SVM</option>
+                    <option value="RandomForest">Random Forest</option>
+                    <option value="NaiveBayes">Naive Bayes</option>
+                    <option value="NeuralNetwork">Neural Network</option>
+                </select>
+            </div>
+
+            <!-- C-Value -->
+            <div class="form-group" id="edit-bm-c-value-group">
+                <label for="edit-bm-c-value">C-Value:</label>
+                <select id="edit-bm-c-value" style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:4px;">
+                    <option value="0.001">0.001</option>
+                    <option value="0.01">0.01</option>
+                    <option value="0.1">0.1</option>
+                    <option value="1.0">1.0</option>
+                    <option value="10.0">10.0</option>
+                    <option value="100.0">100.0</option>
+                </select>
+            </div>
+
+            <!-- Include Injuries -->
+            <div class="form-group">
+                <label style="display:flex; align-items:center; cursor:pointer;">
+                    <input type="checkbox" id="edit-bm-include-injuries" style="margin-right:8px;">
+                    Include Injuries Features
+                </label>
+            </div>
+
+            <!-- Time Settings (read-only) -->
+            <div id="edit-bm-time-settings" style="background:#f0f4ff; padding:12px 16px; border-radius:6px; margin-bottom:15px; font-size:0.9em; color:#555;">
+                <strong style="color:#333;">Time Settings (shared across ensemble — read-only)</strong>
+                <div id="edit-bm-time-details" style="margin-top:8px;"></div>
+            </div>
+
+            <!-- Feature Sets -->
+            <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                <label style="font-weight:600; color:#333;">Feature Sets <span id="edit-bm-feature-count" style="font-weight:400; color:#666;">(0 features selected)</span></label>
+                <button type="button" id="edit-bm-features-pencil" title="Edit features by name" style="background:none; border:none; cursor:pointer; padding:2px 4px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/></svg>
+                </button>
+            </div>
+            <div id="edit-bm-feature-sets" style="max-height:500px; overflow-y:auto; border:1px solid #ddd; border-radius:6px; background:#fafafa;"></div>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding:15px 25px; border-top:1px solid #eee; display:flex; gap:10px; justify-content:flex-end; flex-shrink:0;">
+            <button class="btn btn-secondary" onclick="closeEditBaseModelModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveBaseModelEdits()">Save</button>
+            <button class="btn btn-success" onclick="saveAndRetrainBaseModel()">Save &amp; Re-train</button>
+        </div>
+    </div>
+</div>
+
+<!-- Feature Selection by Name Modal -->
+<div id="edit-bm-feature-name-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10001; display:none; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:8px; max-width:600px; width:90%; max-height:80vh; display:flex; flex-direction:column;">
+        <div style="padding:15px 20px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+            <h3 style="margin:0;">Select Features by Name</h3>
+            <button type="button" onclick="document.getElementById('edit-bm-feature-name-modal').style.display='none'" style="background:none; border:none; font-size:1.4em; cursor:pointer;">&times;</button>
+        </div>
+        <div style="padding:20px; overflow-y:auto;">
+            <p style="margin:0 0 10px; color:#666; font-size:0.9em;">Enter feature names separated by commas or new lines. Features will be automatically checked.</p>
+            <textarea id="edit-bm-feature-names-input" placeholder="feature1, feature2, feature3&#10;or&#10;feature1&#10;feature2&#10;feature3" style="width:100%; min-height:200px; padding:10px; border:1px solid #ddd; border-radius:4px; font-family:monospace; font-size:0.9em; resize:vertical; box-sizing:border-box;"></textarea>
+            <div style="margin-top:15px;">
+                <label style="display:flex; align-items:center; cursor:pointer;">
+                    <input type="checkbox" id="edit-bm-clear-and-reselect" style="margin-right:8px;">
+                    <span>Clear all selections and only select features from the list above</span>
+                </label>
+            </div>
+        </div>
+        <div style="padding:15px 20px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:10px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('edit-bm-feature-name-modal').style.display='none'">Cancel</button>
+            <button class="btn btn-primary" onclick="applyEditBmFeatureNames()">Apply</button>
         </div>
     </div>
 </div>
@@ -396,6 +545,20 @@
 .btn-success:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(39, 174, 96, 0.3);
+}
+
+.btn-retrain {
+    background: #f39c12;
+    color: white;
+}
+
+.btn-retrain:hover {
+    background: #e67e22;
+}
+
+.btn-retrain:disabled {
+    background: #bdc3c7;
+    cursor: not-allowed;
 }
 
 .btn-copy {
@@ -720,6 +883,10 @@
 </style>
 
 <script>
+// Feature sets data (from master CSV)
+const FEATURE_SETS = {{ feature_sets | tojson | safe }};
+const FEATURE_SET_DESCRIPTIONS = {{ feature_set_descriptions | tojson | safe }};
+
 // State
 let allEnsembles = [];
 let allBaseModels = [];
@@ -972,7 +1139,8 @@ function renderEnsembleCard(ensemble) {
                     <div class="base-model-card-type">${bm.model_type} | C=${bm.c_value || 'N/A'}</div>
                 </div>
                 <div class="base-model-card-actions">
-                    <button class="btn btn-small" onclick="retrainBaseModel('${ensemble._id}', '${bm._id}')" title="Retrain this base model">Retrain</button>
+                    <button class="btn btn-small btn-retrain" onclick="retrainBaseModel('${ensemble._id}', '${bm._id}', '${escapeHtml(bm.name || bm.model_type).replace(/'/g, "&#39;")}')" title="Retrain this base model with current settings">Retrain</button>
+                    <button class="btn btn-small" onclick="openEditBaseModelModal('${ensemble._id}', '${bm._id}')" title="Edit base model config">Edit</button>
                     <button class="btn btn-small btn-danger" onclick="removeBaseModel('${ensemble._id}', '${bm._id}')" title="Remove from ensemble">Remove</button>
                 </div>
             </div>
@@ -981,6 +1149,13 @@ function renderEnsembleCard(ensemble) {
                 <span class="base-metric"><span class="base-metric-label">LogLoss:</span>${formatMetric(bm.log_loss)}</span>
                 <span class="base-metric"><span class="base-metric-label">Brier:</span>${formatMetric(bm.brier_score)}</span>
             </div>
+            ${bm.training_stats && (bm.training_stats.train_games || bm.training_stats.calibration_games || bm.training_stats.eval_games) ? `
+            <div class="base-model-card-metrics" style="margin-top: 4px;">
+                <span class="base-metric"><span class="base-metric-label">Train:</span>${bm.training_stats.train_games ?? 'N/A'} games</span>
+                <span class="base-metric"><span class="base-metric-label">Cal:</span>${bm.training_stats.calibration_games ?? 'N/A'} games</span>
+                <span class="base-metric"><span class="base-metric-label">Eval:</span>${bm.training_stats.eval_games ?? 'N/A'} games</span>
+            </div>
+            ` : ''}
         </div>
     `).join('') || '<div style="color: #666; font-style: italic;">Base model details not loaded</div>';
 
@@ -1005,6 +1180,7 @@ function renderEnsembleCard(ensemble) {
                         </svg>
                     </button>
                     <button class="btn btn-small" onclick="editEnsemble('${ensemble._id}')" title="Edit ensemble">Edit</button>
+                    <button class="btn btn-small" onclick="openCalibrationModal('${ensemble._id}')" title="Update time calibration for all base models">Update Cal</button>
                     <button class="btn btn-small btn-success" onclick="selectEnsemble('${ensemble._id}')" ${isSelected ? 'disabled' : ''}>
                         ${isSelected ? 'Selected' : 'Select'}
                     </button>
@@ -1031,10 +1207,11 @@ function renderEnsembleCard(ensemble) {
 
             <div class="time-config-display">
                 <strong>Time Config:</strong>
+                Method: ${ensemble.calibration_method || 'N/A'} |
                 Begin: ${ensemble.begin_year || 'N/A'} |
                 Calibration: ${(ensemble.calibration_years || []).join(', ') || 'N/A'} |
                 Evaluation: ${ensemble.evaluation_year || 'N/A'} |
-                Min Games: ${ensemble.min_games_played || 0}
+                Min Games: ${ensemble.min_games_played || 0}${ensemble.exclude_seasons?.length ? ' | Exclude: ' + ensemble.exclude_seasons.join(', ') : ''}
             </div>
 
             <div class="base-models-section">
@@ -1177,7 +1354,7 @@ async function saveEnsemble() {
         });
         const data = await response.json();
 
-        if (!data.valid) {
+        if (!data.success) {
             alert('Validation failed: ' + data.error);
             return;
         }
@@ -1268,15 +1445,16 @@ async function retrainMetaOnly() {
     }
 }
 
-async function retrainBaseModel(ensembleId, baseModelId) {
-    if (!confirm('This will retrain the base model and then retrain the meta-model. Continue?')) {
+async function retrainBaseModel(ensembleId, baseModelId, modelName) {
+    if (!confirm(`Retrain base model "${modelName}"?\n\nThis will retrain the model with its current settings, then retrain the ensemble meta-model.`)) {
         return;
     }
 
     try {
-        showProgress('Retraining base model...');
+        showProgress(`Retraining base model: ${modelName}...`);
 
-        const response = await fetch(`/api/ensembles/${ensembleId}/retrain-base/${baseModelId}`, {
+        const leaguePrefix = window.location.pathname.split('/')[1];
+        const response = await fetch(`/${leaguePrefix}/api/ensembles/${ensembleId}/retrain-base/${baseModelId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -1287,11 +1465,11 @@ async function retrainBaseModel(ensembleId, baseModelId) {
             pollJobProgress();
         } else {
             hideProgress();
-            alert('Failed to retrain base model: ' + data.error);
+            alert('Failed to start retraining: ' + (data.error || 'Unknown error'));
         }
     } catch (error) {
         hideProgress();
-        alert('Error retraining base model: ' + error.message);
+        alert('Error starting retrain: ' + error.message);
     }
 }
 
@@ -1438,10 +1616,94 @@ function pollJobProgress() {
     }, 1500);
 }
 
+// ========== Calibration Modal ==========
+
+function openCalibrationModal(ensembleId) {
+    const ensemble = allEnsembles.find(e => e._id === ensembleId);
+    if (!ensemble) { alert('Ensemble not found'); return; }
+
+    document.getElementById('cal-modal-ensemble-id').value = ensembleId;
+    document.getElementById('cal-method').value = ensemble.calibration_method || 'isotonic';
+    document.getElementById('cal-begin-year').value = ensemble.begin_year || 2010;
+    document.getElementById('cal-years').value = (ensemble.calibration_years || []).join(', ');
+    document.getElementById('cal-eval-year').value = ensemble.evaluation_year || 2024;
+    document.getElementById('cal-exclude').value = (ensemble.exclude_seasons || []).join(', ');
+    document.getElementById('cal-min-games').value = ensemble.min_games_played != null ? ensemble.min_games_played : 15;
+
+    const modal = document.getElementById('calibration-modal');
+    modal.style.display = 'flex';
+}
+
+function closeCalibrationModal() {
+    document.getElementById('calibration-modal').style.display = 'none';
+}
+
+async function submitCalibrationUpdate() {
+    const ensembleId = document.getElementById('cal-modal-ensemble-id').value;
+    const beginYear = parseInt(document.getElementById('cal-begin-year').value);
+    const evalYear = parseInt(document.getElementById('cal-eval-year').value);
+    const calMethod = document.getElementById('cal-method').value;
+
+    const calYearsStr = document.getElementById('cal-years').value.trim();
+    const calibrationYears = calYearsStr ? calYearsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
+
+    const excludeStr = document.getElementById('cal-exclude').value.trim();
+    const excludeSeasons = excludeStr ? excludeStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
+
+    const minGamesRaw = document.getElementById('cal-min-games').value;
+    const minGamesPlayed = minGamesRaw !== '' ? parseInt(minGamesRaw) : null;
+
+    if (!beginYear || calibrationYears.length === 0 || !evalYear) {
+        alert('Begin Year, Calibration Years, and Evaluation Year are required.');
+        return;
+    }
+
+    if (beginYear >= Math.min(...calibrationYears)) {
+        alert('Begin Year must be before the earliest Calibration Year.');
+        return;
+    }
+
+    closeCalibrationModal();
+    showProgress('Starting recalibration...');
+
+    try {
+        const leaguePrefix = window.location.pathname.split('/')[1];
+        const url = `/${leaguePrefix}/api/ensembles/${ensembleId}/update-calibration`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                begin_year: beginYear,
+                calibration_years: calibrationYears,
+                evaluation_year: evalYear,
+                calibration_method: calMethod,
+                exclude_seasons: excludeSeasons.length > 0 ? excludeSeasons : null,
+                min_games_played: minGamesPlayed,
+            })
+        });
+        const data = await response.json();
+
+        if (data.success && data.job_id) {
+            currentJobId = data.job_id;
+            pollJobProgress();
+        } else {
+            hideProgress();
+            alert('Failed to start recalibration: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        hideProgress();
+        alert('Error starting recalibration: ' + error.message);
+    }
+}
+
 // ========== Utilities ==========
 
 function gatherFormConfig() {
-    const customFeatures = document.getElementById('custom-meta-features').value
+    const stackingMode = document.getElementById('stacking-mode').value;
+    const isNaive = stackingMode === 'naive';
+
+    const customFeatures = isNaive ? [] : document.getElementById('custom-meta-features').value
         .split(',')
         .map(f => f.trim())
         .filter(f => f);
@@ -1450,11 +1712,13 @@ function gatherFormConfig() {
         ensemble: true,
         ensemble_models: Array.from(selectedBaseModelIds),
         ensemble_meta_features: customFeatures,
-        ensemble_use_disagree: document.getElementById('use-disagree').checked,
-        ensemble_use_conf: document.getElementById('use-conf').checked,
+        ensemble_use_disagree: isNaive ? false : document.getElementById('use-disagree').checked,
+        ensemble_use_conf: isNaive ? false : document.getElementById('use-conf').checked,
         meta_model_type: document.getElementById('meta-model-type').value,
         meta_c_value: document.getElementById('meta-c-value').value,
-        stacking_mode: document.getElementById('stacking-mode').value,
+        model_type: document.getElementById('meta-model-type').value,
+        best_c_value: parseFloat(document.getElementById('meta-c-value').value) || null,
+        stacking_mode: stackingMode,
         force_rebuild_dataset: document.getElementById('force-rebuild-dataset').checked
     };
 }
@@ -1600,6 +1864,328 @@ function copyEnsembleDetails(ensembleId) {
         console.error('Failed to copy:', err);
         alert('Failed to copy to clipboard');
     });
+}
+
+// ========== Edit Base Model Modal ==========
+
+async function openEditBaseModelModal(ensembleId, baseModelId) {
+    document.getElementById('edit-bm-ensemble-id').value = ensembleId;
+    document.getElementById('edit-bm-model-id').value = baseModelId;
+
+    try {
+        const leaguePrefix = window.location.pathname.split('/')[1];
+        const response = await fetch(`/${leaguePrefix}/api/model-configs/${baseModelId}`);
+        const data = await response.json();
+
+        if (!data.success) {
+            alert('Failed to load model config: ' + data.error);
+            return;
+        }
+
+        const config = data.config;
+
+        // Populate form fields
+        document.getElementById('edit-bm-name').value = config.name || '';
+        document.getElementById('edit-bm-model-type').value = config.model_type || 'LogisticRegression';
+        onEditBmModelTypeChange();
+
+        // Set c-value: try to match existing option, otherwise select closest
+        const cVal = config.best_c_value;
+        if (cVal != null) {
+            const sel = document.getElementById('edit-bm-c-value');
+            let matched = false;
+            for (const opt of sel.options) {
+                if (parseFloat(opt.value) === parseFloat(cVal)) {
+                    sel.value = opt.value;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) sel.value = '1.0';
+        }
+
+        document.getElementById('edit-bm-include-injuries').checked = config.include_injuries || false;
+
+        // Time settings (read-only)
+        const timeHtml = [
+            `Method: ${config.calibration_method || 'N/A'}`,
+            `Begin: ${config.begin_year || 'N/A'}`,
+            `Calibration: ${(config.calibration_years || []).join(', ') || 'N/A'}`,
+            `Evaluation: ${config.evaluation_year || 'N/A'}`,
+            `Min Games: ${config.min_games_played ?? 15}`,
+            config.exclude_seasons?.length ? `Exclude: ${config.exclude_seasons.join(', ')}` : null,
+        ].filter(Boolean).join(' | ');
+        document.getElementById('edit-bm-time-details').textContent = timeHtml;
+
+        // Render feature sets
+        renderEditModalFeatureSets(config.features || []);
+
+        // Show modal
+        document.getElementById('edit-base-model-modal').style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    } catch (error) {
+        alert('Error loading model config: ' + error.message);
+    }
+}
+
+function closeEditBaseModelModal() {
+    document.getElementById('edit-base-model-modal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function onEditBmModelTypeChange() {
+    const type = document.getElementById('edit-bm-model-type').value;
+    document.getElementById('edit-bm-c-value-group').style.display =
+        (type === 'LogisticRegression' || type === 'SVM') ? 'block' : 'none';
+}
+
+function renderEditModalFeatureSets(selectedFeatures) {
+    const container = document.getElementById('edit-bm-feature-sets');
+    const selectedSet = new Set(selectedFeatures);
+    let html = '';
+
+    for (const [setName, features] of Object.entries(FEATURE_SETS)) {
+        const selectedInSet = features.filter(f => selectedSet.has(f)).length;
+        const allSelected = selectedInSet === features.length;
+        const someSelected = selectedInSet > 0 && !allSelected;
+        const description = FEATURE_SET_DESCRIPTIONS[setName] || '';
+        const displayName = setName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+        html += `
+            <div style="border-bottom:1px solid #eee;">
+                <div style="padding:10px 14px; display:flex; align-items:center; gap:10px; cursor:pointer;"
+                     onclick="toggleEditBmSetExpand('${setName}')">
+                    <input type="checkbox" id="edit-bm-set-${setName}"
+                           ${allSelected ? 'checked' : ''}
+                           onchange="toggleEditBmFeatureSet('${setName}', this.checked); event.stopPropagation();"
+                           style="cursor:pointer;">
+                    <div style="flex:1;">
+                        <strong style="font-size:0.93em;">${displayName}</strong>
+                        <span style="font-size:0.8em; color:#888; margin-left:6px;">${description}</span>
+                    </div>
+                    <span style="background:#667eea; color:white; font-size:0.75em; padding:2px 8px; border-radius:10px; font-weight:600;"
+                          id="edit-bm-count-${setName}">${selectedInSet}/${features.length}</span>
+                    <span class="toggle-icon" id="edit-bm-expand-icon-${setName}" style="font-size:0.8em; transition:transform 0.2s;">&#9660;</span>
+                </div>
+                <div id="edit-bm-features-${setName}" style="display:none; padding:4px 14px 10px 36px; max-height:200px; overflow-y:auto;">
+                    ${features.map(f => `
+                        <label style="display:block; padding:3px 0; font-size:0.88em; cursor:pointer;">
+                            <input type="checkbox" class="edit-bm-feature" data-set="${setName}" value="${f}"
+                                   ${selectedSet.has(f) ? 'checked' : ''}
+                                   onchange="updateEditBmSetCheckbox('${setName}'); updateEditBmFeatureCount()">
+                            ${f}
+                        </label>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+
+    // Set indeterminate state for partially selected sets
+    for (const [setName, features] of Object.entries(FEATURE_SETS)) {
+        const cb = document.getElementById(`edit-bm-set-${setName}`);
+        const selectedInSet = features.filter(f => selectedSet.has(f)).length;
+        if (selectedInSet > 0 && selectedInSet < features.length) {
+            cb.indeterminate = true;
+        }
+    }
+
+    updateEditBmFeatureCount();
+}
+
+function toggleEditBmSetExpand(setName) {
+    const el = document.getElementById(`edit-bm-features-${setName}`);
+    const icon = document.getElementById(`edit-bm-expand-icon-${setName}`);
+    const isExpanded = el.style.display !== 'none';
+    el.style.display = isExpanded ? 'none' : 'block';
+    icon.style.transform = isExpanded ? '' : 'rotate(180deg)';
+}
+
+function toggleEditBmFeatureSet(setName, checked) {
+    const checkboxes = document.querySelectorAll(`.edit-bm-feature[data-set="${setName}"]`);
+    checkboxes.forEach(cb => cb.checked = checked);
+
+    const setCb = document.getElementById(`edit-bm-set-${setName}`);
+    setCb.indeterminate = false;
+    setCb.checked = checked;
+
+    updateEditBmSetCount(setName);
+    updateEditBmFeatureCount();
+}
+
+function updateEditBmSetCheckbox(setName) {
+    const checkboxes = document.querySelectorAll(`.edit-bm-feature[data-set="${setName}"]`);
+    const total = checkboxes.length;
+    const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
+
+    const setCb = document.getElementById(`edit-bm-set-${setName}`);
+    setCb.checked = checked === total;
+    setCb.indeterminate = checked > 0 && checked < total;
+
+    updateEditBmSetCount(setName);
+}
+
+function updateEditBmSetCount(setName) {
+    const checkboxes = document.querySelectorAll(`.edit-bm-feature[data-set="${setName}"]`);
+    const total = checkboxes.length;
+    const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
+    const badge = document.getElementById(`edit-bm-count-${setName}`);
+    if (badge) badge.textContent = `${checked}/${total}`;
+}
+
+function updateEditBmFeatureCount() {
+    const allChecked = document.querySelectorAll('.edit-bm-feature:checked');
+    document.getElementById('edit-bm-feature-count').textContent = `(${allChecked.length} features selected)`;
+}
+
+// Pencil icon: open feature name entry modal
+document.getElementById('edit-bm-features-pencil').addEventListener('click', function() {
+    const modal = document.getElementById('edit-bm-feature-name-modal');
+    modal.style.display = 'flex';
+    // Pre-populate with currently selected features
+    const current = Array.from(document.querySelectorAll('.edit-bm-feature:checked')).map(cb => cb.value);
+    document.getElementById('edit-bm-feature-names-input').value = current.join('\n');
+    document.getElementById('edit-bm-clear-and-reselect').checked = false;
+});
+
+function applyEditBmFeatureNames() {
+    const input = document.getElementById('edit-bm-feature-names-input').value.trim();
+    if (!input) { alert('Please enter at least one feature name.'); return; }
+
+    const names = input.split(/[,\n]/).map(s => s.trim()).filter(s => s.length > 0);
+    if (names.length === 0) { alert('No valid feature names found.'); return; }
+
+    const allCbs = document.querySelectorAll('.edit-bm-feature');
+    const available = Array.from(allCbs).map(cb => cb.value);
+
+    const matched = [];
+    const notFound = [];
+    names.forEach(name => {
+        const found = available.find(a => a.toLowerCase() === name.toLowerCase());
+        if (found) matched.push(found);
+        else notFound.push(name);
+    });
+
+    if (notFound.length > 0) {
+        const msg = notFound.length <= 5
+            ? `Features not found: ${notFound.join(', ')}`
+            : `${notFound.length} features not found. Check console for details.`;
+        console.warn('Features not found:', notFound);
+        alert(msg);
+    }
+
+    if (matched.length === 0) { alert('No matching features found.'); return; }
+
+    if (document.getElementById('edit-bm-clear-and-reselect').checked) {
+        allCbs.forEach(cb => cb.checked = false);
+    }
+
+    const matchSet = new Set(matched);
+    allCbs.forEach(cb => { if (matchSet.has(cb.value)) cb.checked = true; });
+
+    // Update set checkbox states
+    for (const setName of Object.keys(FEATURE_SETS)) {
+        updateEditBmSetCheckbox(setName);
+    }
+    updateEditBmFeatureCount();
+
+    document.getElementById('edit-bm-feature-name-modal').style.display = 'none';
+    console.log(`Applied ${matched.length} feature(s)${document.getElementById('edit-bm-clear-and-reselect').checked ? ' (cleared first)' : ' (added)'}`);
+}
+
+function gatherEditBmFormData() {
+    const features = Array.from(document.querySelectorAll('.edit-bm-feature:checked')).map(cb => cb.value);
+    const modelType = document.getElementById('edit-bm-model-type').value;
+    const cValue = (modelType === 'LogisticRegression' || modelType === 'SVM')
+        ? parseFloat(document.getElementById('edit-bm-c-value').value)
+        : null;
+
+    return {
+        name: document.getElementById('edit-bm-name').value.trim(),
+        model_type: modelType,
+        features: features,
+        best_c_value: cValue,
+        include_injuries: document.getElementById('edit-bm-include-injuries').checked,
+    };
+}
+
+async function saveBaseModelEdits() {
+    const modelId = document.getElementById('edit-bm-model-id').value;
+    const formData = gatherEditBmFormData();
+
+    if (formData.features.length === 0) {
+        alert('Please select at least one feature.');
+        return;
+    }
+
+    try {
+        const leaguePrefix = window.location.pathname.split('/')[1];
+        const response = await fetch(`/${leaguePrefix}/api/model-configs/${modelId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            loadEnsembles();
+            alert('Base model config saved.');
+        } else {
+            alert('Failed to save: ' + data.error);
+        }
+    } catch (error) {
+        alert('Error saving: ' + error.message);
+    }
+}
+
+async function saveAndRetrainBaseModel() {
+    const ensembleId = document.getElementById('edit-bm-ensemble-id').value;
+    const modelId = document.getElementById('edit-bm-model-id').value;
+    const formData = gatherEditBmFormData();
+
+    if (formData.features.length === 0) {
+        alert('Please select at least one feature.');
+        return;
+    }
+
+    try {
+        // First save the edits
+        const leaguePrefix = window.location.pathname.split('/')[1];
+        const saveResponse = await fetch(`/${leaguePrefix}/api/model-configs/${modelId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        const saveData = await saveResponse.json();
+
+        if (!saveData.success) {
+            alert('Failed to save: ' + saveData.error);
+            return;
+        }
+
+        // Close modal and start retrain
+        closeEditBaseModelModal();
+        showProgress('Retraining base model...');
+
+        const retrainResponse = await fetch(`/${leaguePrefix}/api/ensembles/${ensembleId}/retrain-base/${modelId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const retrainData = await retrainResponse.json();
+
+        if (retrainData.success && retrainData.job_id) {
+            currentJobId = retrainData.job_id;
+            pollJobProgress();
+        } else {
+            hideProgress();
+            alert('Failed to start retraining: ' + (retrainData.error || 'Unknown error'));
+        }
+    } catch (error) {
+        hideProgress();
+        alert('Error: ' + error.message);
+    }
 }
 </script>
 

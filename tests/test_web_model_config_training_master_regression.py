@@ -57,12 +57,12 @@ def test_use_master_training_branch_no_nameerror() -> bool:
     fake_db = _FakeDB()
 
     # Patch Mongo before importing web.app because web.app creates Mongo() at import time.
-    with mock.patch('nba_app.core.mongo.Mongo', autospec=True) as MongoPatched:
+    with mock.patch('bball_app.core.mongo.Mongo', autospec=True) as MongoPatched:
         MongoPatched.return_value = SimpleNamespace(db=fake_db)
 
-        if 'nba_app.web.app' in sys.modules:
-            del sys.modules['nba_app.web.app']
-        web_app = importlib.import_module('nba_app.web.app')
+        if 'bball_app.web.app' in sys.modules:
+            del sys.modules['bball_app.web.app']
+        web_app = importlib.import_module('bball_app.web.app')
 
     # Stub job progress update to avoid needing real job rows.
     web_app.update_job_progress = lambda *args, **kwargs: None
@@ -93,7 +93,7 @@ def test_use_master_training_branch_no_nameerror() -> bool:
 
         # Patch the imported-in-function module symbols via sys.modules trick:
         # We patch the actual core.services.training_data module functions/constants.
-        import nba_app.core.services.training_data as mtd
+        import bball_app.core.services.training_data as mtd
         mtd.MASTER_TRAINING_PATH = master_path
         mtd.generate_master_training_data = _fake_generate_master_training_data
         mtd.check_master_needs_regeneration = _fake_check_master_needs_regeneration

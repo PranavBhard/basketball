@@ -15,9 +15,9 @@ parent_of_nba_app = os.path.dirname(nba_app_dir)  # Directory containing nba_app
 if parent_of_nba_app not in sys.path:
     sys.path.insert(0, parent_of_nba_app)
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.stats.per_calculator import PERCalculator
-from nba_app.core.models.bball_model import BballModel
+from bball_app.core.mongo import Mongo
+from bball_app.core.stats.per_calculator import PERCalculator
+from bball_app.core.models.bball_model import BballModel
 
 def debug_mil_den_prediction():
     """Debug the exact prediction flow for MIL@DEN 2026-01-11."""

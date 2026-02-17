@@ -12,8 +12,8 @@ This module provides:
 - injuries_pipeline: Injury computation and updates
 """
 
-from nba_app.core.pipeline.config import PipelineConfig, TrainingConfig, SyncConfig
-from nba_app.core.pipeline.shared_context import SharedFeatureContext
+from bball_app.core.pipeline.config import PipelineConfig, TrainingConfig, SyncConfig
+from bball_app.core.pipeline.shared_context import SharedFeatureContext
 
 __all__ = [
     "PipelineConfig",

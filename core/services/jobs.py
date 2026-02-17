@@ -6,7 +6,7 @@ Flask request handlers and background threads. Uses _raw_db for thread-safe
 MongoDB access without Flask context.
 
 Usage:
-    from nba_app.core.services.jobs import create_job, update_job_progress, complete_job, fail_job
+    from bball_app.core.services.jobs import create_job, update_job_progress, complete_job, fail_job
 
     job_id = create_job('predict_all', league=league, metadata={'date': '2026-01-26'})
     update_job_progress(job_id, 50, 'Processing...', league=league)
@@ -19,12 +19,12 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 
 from bson import ObjectId
 
-from nba_app.core.mongo import Mongo
+from bball_app.core.mongo import Mongo
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 # Thread-safe MongoDB connection (not Flask-request-bound)
 _mongo = None

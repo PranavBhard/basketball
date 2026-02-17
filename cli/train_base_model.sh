@@ -44,7 +44,7 @@ cd "$(dirname "$0")/.."
 source ./setup.sh
 
 # Set Python path
-export PYTHONPATH=/Users/pranav/Documents/NBA
+export PYTHONPATH=/Users/pranav/Documents/basketball
 
 # Run the training script
-python -m nba_app.cli.scripts.train_base_model "$LEAGUE" "$@"
+python -m bball_app.cli.scripts.train_base_model "$LEAGUE" "$@"

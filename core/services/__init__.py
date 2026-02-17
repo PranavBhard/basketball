@@ -14,19 +14,19 @@ This module contains high-level service orchestration:
 """
 
 # Prediction service
-from nba_app.core.services.prediction import PredictionService, PredictionResult, MatchupInfo
+from bball_app.core.services.prediction import PredictionService, PredictionResult, MatchupInfo
 
 # Config manager
-from nba_app.core.services.config_manager import ModelConfigManager
+from bball_app.core.services.config_manager import ModelConfigManager
 
 # Business logic
-from nba_app.core.services.business_logic import ModelBusinessLogic
+from bball_app.core.services.business_logic import ModelBusinessLogic
 
 # Artifacts
-from nba_app.core.services.artifacts import ArtifactManager
+from bball_app.core.services.artifacts import ArtifactManager
 
 # Training data
-from nba_app.core.services.training_data import (
+from bball_app.core.services.training_data import (
     TrainingDataService,
     # Module-level constants
     MASTER_TRAINING_PATH,
@@ -43,36 +43,29 @@ from nba_app.core.services.training_data import (
 )
 
 # Training service (CLI orchestration)
-from nba_app.core.services.training_service import TrainingService
+from bball_app.core.services.training_service import TrainingService
 
 # Webpage parser
-from nba_app.core.services.webpage_parser import WebpageParser
+from bball_app.core.services.webpage_parser import WebpageParser
 
 # Lineup service
-from nba_app.core.services.lineup_service import (
-    LineupService,
-    GameLineups,
-    TeamLineup,
-    PlayerLineup,
-    get_game_lineups,
-    get_projected_lineups,
-)
+from bball_app.core.services.lineup_service import get_lineups
 
 # News service
-from nba_app.core.services.news_service import NewsService, FetchResult, NewsResults
+from bball_app.core.services.news_service import NewsService, FetchResult, NewsResults
 
 # Game service
-from nba_app.core.services.game_service import (
+from bball_app.core.services.game_service import (
     get_game_detail,
     get_team_players,
     get_team_info,
 )
 
 # Roster service
-from nba_app.core.services.roster_service import build_rosters
+from bball_app.core.services.roster_service import build_rosters
 
 # Jobs infrastructure (for background task tracking)
-from nba_app.core.services.jobs import (
+from bball_app.core.services.jobs import (
     create_job,
     update_job_progress,
     complete_job,
@@ -108,12 +101,7 @@ __all__ = [
     # Webpage parser
     'WebpageParser',
     # Lineup service
-    'LineupService',
-    'GameLineups',
-    'TeamLineup',
-    'PlayerLineup',
-    'get_game_lineups',
-    'get_projected_lineups',
+    'get_lineups',
     # News service
     'NewsService',
     'FetchResult',

@@ -14,7 +14,7 @@ with optional filtering by model type or availability in master training CSV.
 """
 
 from typing import List, Dict, Set, Optional
-from nba_app.core.features.registry import FeatureRegistry, FeatureGroups
+from bball_app.core.features.registry import FeatureRegistry, FeatureGroups
 
 
 # =============================================================================
@@ -135,17 +135,18 @@ def filter_features_by_model_type(features: List[str], model_type: Optional[str]
     return features
 
 
-def get_all_features(model_type: Optional[str] = None) -> List[str]:
+def get_all_features(model_type: Optional[str] = None, league=None) -> List[str]:
     """
     Get all features from all sets, optionally filtered by model type.
 
     Args:
         model_type: Optional model type to filter features ('LogisticRegression', 'Tree', 'NeuralNetwork')
+        league: Optional LeagueConfig to include league-specific features
 
     Returns:
         List of feature names, filtered if model_type is provided
     """
-    all_features = FeatureGroups.get_all_features_flat(include_side=True)
+    all_features = FeatureGroups.get_all_features_flat(include_side=True, league=league)
     return filter_features_by_model_type(all_features, model_type)
 
 

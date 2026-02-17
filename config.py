@@ -16,5 +16,8 @@ config = {
     "KALSHI_READ_PRIVATE_KEY_DIR": os.environ.get("KALSHI_READ_PRIVATE_KEY_DIR", ""),
     "STAKE_TOKEN": os.environ.get("STAKE_TOKEN", ""),
     "SERP_API_KEY": os.environ.get("SERP_API_KEY", ""),
+    "BASKETBALL_APP_URL": os.environ.get("BASKETBALL_HOST", ""),
+    "FOOTBALL_APP_URL": os.environ.get("FOOTBALL_HOST", ""),
+    "SOCCER_APP_URL": os.environ.get("SOCCER_HOST", ""),
 }
 

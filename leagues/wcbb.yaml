@@ -1,0 +1,227 @@
+meta:
+  league_id: wcbb
+  display_name: Women's College Basketball (WCBB)
+  sport: basketball
+  logo_url: /static/imgs/wcbb.png
+
+mongo:
+  collections:
+    games: wcbb_stats_games
+    player_stats: wcbb_stats_players
+    players: wcbb_players
+    teams: wcbb_teams
+    venues: wcbb_venues
+    rosters: wcbb_rosters
+
+    model_config_classifier: wcbb_model_config
+    model_config_points: wcbb_model_config_points
+    model_predictions: wcbb_model_predictions
+    experiment_runs: wcbb_experiment_runs
+
+    master_training_metadata: master_training_data_wcbb
+
+    cached_league_stats: wcbb_cached_league_stats
+    elo_cache: wcbb_cached_elo_ratings
+    jobs: wcbb_jobs
+
+paths:
+  master_training_csv: master_training/MASTER_TRAINING_WCBB.csv
+
+espn:
+  base_url_web: https://site.web.api.espn.com
+  base_url_site: https://site.api.espn.com
+
+  league_slug: womens-college-basketball
+  sport_path: womens-college-basketball
+
+  endpoints:
+    scoreboard_header_template: "{base_url_web}/apis/personalized/v2/scoreboard/header?sport=basketball&league={league_slug}&region=us&lang=en&contentorigin=espn&dates={YYYYMMDD}&tz=America%2FNew_York&groups=50"
+    scoreboard_site_template: "{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/scoreboard?dates={YYYYMMDD}&groups=50"
+    game_summary_template: "{base_url_web}/apis/site/v2/sports/basketball/{sport_path}/summary?region=us&lang=en&contentorigin=espn&event={game_id}"
+    teams_template: "{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/teams"
+    roster_template: "{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/teams/{team_id}/roster"
+
+  examples:
+    scoreboard_header_example: cli/structure_examples/espn_games_resp_example.md
+    game_summary_pregame_example: cli/structure_examples/espn_cbb_api_pre_game.md
+    game_summary_postgame_example: cli/structure_examples/espn_cbb_api_post_game.md
+
+season:
+  timezone: America/New_York
+  season_cutover_month: 8
+  exclude_game_types: []
+  game_type_map:
+    1: preseason
+    2: regseason
+    3: postseason
+  postseason_tournament_game_type: tournament
+  playin_text_override: false
+
+extra_features:
+  stats:
+    - conf_wins
+    - same_conf
+    - conf_gp
+    - conf_margin
+
+teams:
+  team_id_map_file: leagues/team_id_maps/wcbb_espn_team_id_to_abbrev.json
+  primary_identifier: id
+  include_team_id: true
+
+market:
+  provider: kalshi
+  base_url: https://api.elections.kalshi.com/trade-api/v2
+  series_ticker: KXNCAAWBGAME
+  spread_series_ticker: KXNCAAWBSPREAD
+
+  # Event ticker format: KXNCAAWBGAME-{YY}{MON}{DD}{AWAY}{HOME}
+  # Uses same variable-length abbreviation scheme as men's CBB
+
+  # Map Kalshi abbreviations to internal ESPN abbreviations
+  # Only teams that differ are listed; unlisted teams use same abbrev
+  # Start with subset from men's CBB - many overlap. Expand as needed.
+  team_abbrev_map:
+    AC: ACU
+    AFA: AF
+    ALBY: ALBA
+    ARPB: UAPB
+    BSU: BOIS
+    BUFF: BUF
+    CAMP: CAM
+    CCAR: CCU
+    CHAR: CLT
+    CHAT: UTC
+    CHS: CHST
+    CLEV: CLE
+    CLMB: COLU
+    COOK: BCU
+    CSB: CSUB
+    CSF: CSUF
+    CSN: CSUN
+    DET: DETM
+    EKY: EKU
+    GC: GCU
+    HP: HPU
+    IND: IU
+    IW: UIW
+    JAC: JAX
+    JVST: JXST
+    LCHI: LUC
+    LINW: LIND
+    LMC: LEM
+    LMD: L-MD
+    MASSL: UML
+    MCNS: MCN
+    MHU: MERC
+    MIZZ: MIZ
+    MOH: M-OH
+    MOSU: MOST
+    MTU: MTSU
+    MURR: MUR
+    NCST: NCSU
+    NEOM: OMA
+    NIAG: NIA
+    NW: NU
+    OKLA: OU
+    PEAY: APSU
+    PRE: PRES
+    QUC: QUCH
+    SBON: SBU
+    SCAR: SC
+    SPC: SPU
+    STNH: STO
+    STON: STBK
+    TARL: TAR
+    TOWS: TOW
+    TXAM: TA&M
+    UALR: LR
+    UCRV: UCR
+    ULL: UL
+    UMKC: KC
+    USI: SOIN
+    UST: STMN
+    UTRGV: RGV
+    UWGA: WGA
+    VALP: VAL
+    WEBB: GWEB
+    WM: W&M
+
+news_sources:
+  espn:
+    base_url: https://www.espn.com
+    sport_path: womens-college-basketball
+    content_types: [news, stats, scores, injuries, schedule, boxscore]
+
+    patterns:
+      team: /{sport_path}/team/_/id/{team_id}
+      team_news: /{sport_path}/team/news/_/id/{team_id}
+      team_schedule: /{sport_path}/team/schedule/_/id/{team_id}
+      team_roster: /{sport_path}/team/roster/_/id/{team_id}
+      team_stats: /{sport_path}/team/stats/_/id/{team_id}
+      player: /{sport_path}/player/_/id/{player_id}/{player_slug}
+      player_news: /{sport_path}/player/news/_/id/{player_id}
+      player_stats: /{sport_path}/player/stats/_/id/{player_id}
+      player_gamelog: /{sport_path}/player/gamelog/_/id/{player_id}
+      player_bio: /{sport_path}/player/bio/_/id/{player_id}
+      game: /{sport_path}/game/_/gameId/{game_id}
+      game_boxscore: /{sport_path}/boxscore/_/gameId/{game_id}
+      game_playbyplay: /{sport_path}/playbyplay/_/gameId/{game_id}
+      game_recap: /{sport_path}/recap/_/gameId/{game_id}
+
+    mappings:
+      team_ids_file: leagues/team_id_maps/wcbb_espn_team_id_to_abbrev.json
+      player_ids_file: leagues/id_maps/wcbb_espn_player_ids.json
+      game_id_field: game_id
+
+  sports_reference:
+    base_url: https://www.sports-reference.com
+    content_types: [stats, roster, game_logs, historical, boxscore]
+
+    patterns:
+      team: /cbb/schools/{school_code}/women/{season}.html
+      team_roster: /cbb/schools/{school_code}/women/{season}.html#roster
+      team_schedule: /cbb/schools/{school_code}/women/{season}-schedule.html
+      team_stats: /cbb/schools/{school_code}/women/{season}.html#totals
+      player: /cbb/players/{player_code}.html
+      player_gamelog: /cbb/players/{player_code}/gamelog/{season}
+      game_boxscore: /cbb/boxscores/{game_date}-{home_code}.html
+
+    mappings:
+      school_codes_file: leagues/id_maps/wcbb_sportsref_school_codes.json
+      player_codes_file: leagues/id_maps/wcbb_sportsref_player_codes.json
+
+pipeline:
+  min_season: "2010-2011"
+  season_start_month: 11
+  season_start_day: 1
+  season_end_month: 4
+  season_end_day: 30
+
+pipelines:
+  full:
+    steps:
+      - espn_pull:
+          parallel: true
+          max_workers: 8
+      - post_processing:
+          refresh_venues: true
+          refresh_players: true
+          build_rosters: true
+          compute_injuries: true
+      - cache_elo: true
+      - generate_training:
+          workers: 32
+          chunk_size: 500
+          include_player_features: true
+      - register_csv: true
+
+  training:
+    workers: 32
+    chunk_size: 500
+    include_player_features: true
+    preload:
+      games: true
+      venues: true
+      per_cache: true
+      injury_cache: true

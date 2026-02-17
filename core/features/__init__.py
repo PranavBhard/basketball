@@ -7,23 +7,23 @@ This module contains all feature-related functionality:
 - Feature parsing, dependencies, and generation
 
 Note: generator and manager are not imported here to avoid circular imports.
-Import them directly: from nba_app.core.features.generator import SharedFeatureGenerator
+Import them directly: from bball_app.core.features.generator import SharedFeatureGenerator
 """
 
 # Registry - central feature definitions
-from nba_app.core.features.registry import FeatureRegistry, FeatureGroups
+from bball_app.core.features.registry import FeatureRegistry, FeatureGroups
 
 # Feature sets
-from nba_app.core.features.sets import FEATURE_SETS
+from bball_app.core.features.sets import FEATURE_SETS
 
 # Parser utilities
-from nba_app.core.features.parser import parse_feature_name
+from bball_app.core.features.parser import parse_feature_name
 
 # Dependencies
-from nba_app.core.features.dependencies import resolve_dependencies, categorize_features
+from bball_app.core.features.dependencies import resolve_dependencies, categorize_features
 
 # Prediction feature mapping
-from nba_app.core.features.prediction_mapping import (
+from bball_app.core.features.prediction_mapping import (
     is_pred_feature,
     parse_pred_feature,
     validate_pred_feature_model_type,
@@ -34,8 +34,8 @@ from nba_app.core.features.prediction_mapping import (
 )
 
 # Note: generator and manager omitted to avoid circular imports with stats module
-# Use direct imports: from nba_app.core.features.generator import SharedFeatureGenerator
-# Use direct imports: from nba_app.core.features.manager import FeatureManager
+# Use direct imports: from bball_app.core.features.generator import SharedFeatureGenerator
+# Use direct imports: from bball_app.core.features.manager import FeatureManager
 
 __all__ = [
     # Registry

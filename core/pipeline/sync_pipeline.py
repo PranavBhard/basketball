@@ -6,10 +6,10 @@ Pulls/upserts ESPN data (games, players, venues, rosters, teams) into MongoDB
 with flexible date filtering and data type selection.
 
 Usage:
-    python -m nba_app.core.pipeline.sync_pipeline nba --date 2024-01-15
-    python -m nba_app.core.pipeline.sync_pipeline cbb --date-range 2024-01-01,2024-01-31
-    python -m nba_app.core.pipeline.sync_pipeline nba --season 2024-2025
-    python -m nba_app.core.pipeline.sync_pipeline nba --season 2024-2025 --with-injuries
+    python -m bball_app.core.pipeline.sync_pipeline nba --date 2024-01-15
+    python -m bball_app.core.pipeline.sync_pipeline cbb --date-range 2024-01-01,2024-01-31
+    python -m bball_app.core.pipeline.sync_pipeline nba --season 2024-2025
+    python -m bball_app.core.pipeline.sync_pipeline nba --season 2024-2025 --with-injuries
 """
 
 import argparse
@@ -27,8 +27,8 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
-from nba_app.core.mongo import Mongo
+from bball_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
+from bball_app.core.mongo import Mongo
 
 
 # Valid data types for sync
@@ -113,14 +113,18 @@ def run_espn_pull(
     start_date: date,
     end_date: date,
     dry_run: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    progress_callback=None
 ) -> dict:
     """
     Run ESPN data pull for a date range.
 
+    Args:
+        progress_callback: Optional callable(percent: int, message: str) for progress updates.
+
     Returns dict with statistics.
     """
-    from nba_app.core.services.espn_sync import fetch_and_save_games
+    from bball_app.core.services.espn_sync import fetch_and_save_games
 
     mongo = Mongo()
     try:
@@ -128,7 +132,8 @@ def run_espn_pull(
             mongo.db, league_config,
             start_date, end_date,
             dry_run=dry_run,
-            verbose=verbose
+            verbose=verbose,
+            progress_callback=progress_callback
         )
     except Exception as e:
         stats = {
@@ -148,11 +153,11 @@ def run_post_processing(
     verbose: bool = False
 ) -> dict:
     """
-    Run post-processing steps (venues, players).
+    Run post-processing steps (venues, teams, players).
 
     Returns dict with step results.
     """
-    from nba_app.core.services.espn_sync import refresh_venues, refresh_players
+    from bball_app.core.services.espn_sync import refresh_venues, refresh_players, refresh_teams
 
     mongo = Mongo()
     results = {}
@@ -164,6 +169,14 @@ def run_post_processing(
             results['venues'] = {'success': result.get('success', True)}
         except Exception as e:
             results['venues'] = {'success': False, 'error': str(e)[:200]}
+
+    if 'teams' in data_types:
+        print("  Refreshing teams metadata...")
+        try:
+            result = refresh_teams(mongo.db, league_config, dry_run=dry_run)
+            results['teams'] = {'success': result.get('success', True)}
+        except Exception as e:
+            results['teams'] = {'success': False, 'error': str(e)[:200]}
 
     if 'players' in data_types:
         print("  Refreshing players metadata...")
@@ -191,7 +204,7 @@ def run_injuries(
     print("  Computing injuries...")
 
     cmd = [
-        sys.executable, "-m", "nba_app.core.pipeline.injuries_pipeline",
+        sys.executable, "-m", "bball_app.core.pipeline.injuries_pipeline",
         league_config.league_id
     ]
 
@@ -231,7 +244,7 @@ def run_elo_cache(
 
     Returns dict with result.
     """
-    from nba_app.core.stats.elo_cache import EloCache
+    from bball_app.core.stats.elo_cache import EloCache
 
     print("  Caching ELO ratings...")
 
@@ -258,112 +271,28 @@ def run_venue_geocoding(
     """
     Geocode venues that don't have location data.
 
-    Uses Nominatim geocoding service with rate limiting.
+    Delegates to geocode_missing_venues() in core/services/espn_sync.py.
 
     Returns dict with statistics.
     """
-    from nba_app.tools.geo import get_geocoder, geocode_venue
+    from bball_app.core.services.espn_sync import geocode_missing_venues
 
     print("  Geocoding venues without location...")
 
-    # Get league-specific venues collection
     mongo = Mongo()
-    venues_collection_name = f"{league_config.league_id}_venues"
-    venues_collection = mongo.db[venues_collection_name]
+    result = geocode_missing_venues(mongo.db, league_config, dry_run=dry_run)
 
-    # Find venues without location
-    venues_without_location = list(venues_collection.find(
-        {'location': {'$exists': False}},
-        {'venue_guid': 1, 'fullName': 1, 'address': 1}
-    ))
+    geocoded = result.get('geocoded', 0)
+    failed = result.get('failed', 0)
+    already = result.get('already_have_location', 0)
 
-    total = venues_collection.count_documents({})
-    with_location = venues_collection.count_documents({'location': {'$exists': True}})
-
-    print(f"    Collection: {venues_collection_name}")
-    print(f"    Total venues: {total}")
-    print(f"    Already geocoded: {with_location}")
-    print(f"    Need geocoding: {len(venues_without_location)}")
-
-    if not venues_without_location:
-        return {
-            'success': True,
-            'total': total,
-            'already_geocoded': with_location,
-            'geocoded': 0,
-            'failed': 0
-        }
-
-    # Initialize geocoder
-    geolocator = get_geocoder()
-
-    geocoded_count = 0
-    failed_count = 0
-
-    for i, venue in enumerate(venues_without_location, 1):
-        venue_guid = venue.get('venue_guid')
-        full_name = venue.get('fullName')
-        address = venue.get('address') or {}
-
-        city = address.get('city', '') if isinstance(address, dict) else ''
-        state = address.get('state', '') if isinstance(address, dict) else ''
-
-        if not full_name:
-            if verbose:
-                print(f"    [{i}/{len(venues_without_location)}] Skipping (no fullName)")
-            failed_count += 1
-            continue
-
-        # Build query string
-        query_parts = [full_name]
-        if city:
-            query_parts.append(city)
-        if state:
-            query_parts.append(state)
-        venue_query = ", ".join(query_parts)
-
-        if verbose:
-            print(f"    [{i}/{len(venues_without_location)}] {venue_query}...", end=' ')
-
-        # Rate limiting - Nominatim allows ~1 request/second
-        if i > 1:
-            time.sleep(1.1)
-
-        lat, lon = geocode_venue(venue_query, geolocator)
-
-        if lat and lon:
-            location = {'lat': lat, 'lon': lon}
-
-            if dry_run:
-                if verbose:
-                    print(f"would set lat={lat:.4f}, lon={lon:.4f}")
-                geocoded_count += 1
-            else:
-                result = venues_collection.update_one(
-                    {'venue_guid': venue_guid},
-                    {'$set': {'location': location}}
-                )
-                if result.modified_count > 0:
-                    if verbose:
-                        print(f"OK lat={lat:.4f}, lon={lon:.4f}")
-                    geocoded_count += 1
-                else:
-                    if verbose:
-                        print("update failed")
-                    failed_count += 1
-        else:
-            if verbose:
-                print("geocoding failed")
-            failed_count += 1
-
-    print(f"    Geocoded: {geocoded_count}, Failed: {failed_count}")
+    if verbose:
+        print(f"    Already had location: {already}")
+        print(f"    Geocoded: {geocoded}, Failed: {failed}")
 
     return {
         'success': True,
-        'total': total,
-        'already_geocoded': with_location,
-        'geocoded': geocoded_count,
-        'failed': failed_count
+        **result,
     }
 
 
@@ -378,7 +307,8 @@ def run_sync_pipeline(
     with_geocoding: bool = False,
     workers: int = 4,
     dry_run: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    progress_callback=None
 ) -> dict:
     """
     Run the full sync pipeline.
@@ -395,6 +325,7 @@ def run_sync_pipeline(
         workers: Number of parallel workers
         dry_run: Preview without database changes
         verbose: Detailed output
+        progress_callback: Optional callable(percent: int, message: str) for progress updates
 
     Returns:
         Dict with pipeline statistics
@@ -426,10 +357,54 @@ def run_sync_pipeline(
         'total_time': 0
     }
 
+    # Helper to report progress
+    def report_progress(percent, message):
+        if progress_callback:
+            progress_callback(percent, message)
+
+    # Determine active steps and assign progress ranges
+    steps_active = []
+    if 'games' in active_types or 'player_stats' in active_types:
+        steps_active.append('espn_pull')
+    if active_types & {'venues', 'players'}:
+        steps_active.append('post_processing')
+    if with_geocoding and 'venues' in active_types:
+        steps_active.append('geocoding')
+    if with_injuries:
+        steps_active.append('injuries')
+    if with_elo:
+        steps_active.append('elo')
+
+    # Weight ESPN pull heavier since it's typically the longest step
+    step_weights = {
+        'espn_pull': 60,
+        'post_processing': 20,
+        'geocoding': 10,
+        'injuries': 10,
+        'elo': 10,
+    }
+    total_weight = sum(step_weights.get(s, 10) for s in steps_active) or 1
+    cumulative = 0
+    step_ranges = {}
+    for s in steps_active:
+        w = step_weights.get(s, 10)
+        start_pct = int(cumulative * 100 / total_weight)
+        cumulative += w
+        end_pct = int(cumulative * 100 / total_weight)
+        step_ranges[s] = (start_pct, end_pct)
+
     # Step 1: ESPN data pull (games, player_stats)
     if 'games' in active_types or 'player_stats' in active_types:
         step_name = "ESPN Data Pull"
         print(f"[1] {step_name}...")
+        espn_range = step_ranges.get('espn_pull', (0, 70))
+        report_progress(espn_range[0], 'Pulling games and player stats from ESPN...')
+
+        # Create sub-callback that maps ESPN pull progress (0-100%) to this step's range
+        def espn_progress_callback(pct, msg):
+            # Map 0-100 from ESPN pull to espn_range[0]-espn_range[1]
+            mapped_pct = espn_range[0] + int(pct * (espn_range[1] - espn_range[0]) / 100)
+            report_progress(mapped_pct, msg)
 
         step_start = time.time()
         espn_stats = run_espn_pull(
@@ -437,7 +412,8 @@ def run_sync_pipeline(
             start_date,
             end_date,
             dry_run=dry_run,
-            verbose=verbose
+            verbose=verbose,
+            progress_callback=espn_progress_callback if progress_callback else None
         )
         step_time = time.time() - step_start
 
@@ -445,6 +421,8 @@ def run_sync_pipeline(
             **espn_stats,
             'time': step_time
         }
+
+        report_progress(step_ranges.get('espn_pull', (0, 70))[1], f"ESPN pull done: {espn_stats['games_processed']} games, {espn_stats['players_processed']} players")
 
         print(f"    Games: {espn_stats['games_processed']:,}")
         print(f"    Players: {espn_stats['players_processed']:,}")
@@ -459,6 +437,7 @@ def run_sync_pipeline(
     if post_types:
         step_name = "Post-Processing"
         print(f"\n[2] {step_name}...")
+        report_progress(step_ranges.get('post_processing', (70, 90))[0], 'Post-processing: refreshing venues and player metadata...')
 
         step_start = time.time()
         post_stats = run_post_processing(
@@ -474,6 +453,8 @@ def run_sync_pipeline(
             'time': step_time
         }
 
+        report_progress(step_ranges.get('post_processing', (70, 90))[1], 'Post-processing complete')
+
         for dtype, status in post_stats.items():
             status_str = "OK" if status.get('success') else f"FAILED: {status.get('error', 'Unknown')}"
             print(f"    {dtype}: {status_str}")
@@ -483,6 +464,7 @@ def run_sync_pipeline(
     if with_geocoding and 'venues' in active_types:
         step_name = "Venue Geocoding"
         print(f"\n[3] {step_name}...")
+        report_progress(step_ranges.get('geocoding', (0, 0))[0], 'Geocoding venues...')
 
         step_start = time.time()
         geocoding_stats = run_venue_geocoding(
@@ -497,12 +479,14 @@ def run_sync_pipeline(
             'time': step_time
         }
 
+        report_progress(step_ranges.get('geocoding', (0, 0))[1], 'Geocoding complete')
         print(f"    Time: {step_time:.1f}s")
 
     # Step 4: Injuries (optional)
     if with_injuries:
         step_name = "Injury Computation"
         print(f"\n[4] {step_name}...")
+        report_progress(step_ranges.get('injuries', (0, 0))[0], 'Computing injuries...')
 
         step_start = time.time()
         injury_stats = run_injuries(
@@ -519,6 +503,7 @@ def run_sync_pipeline(
             'time': step_time
         }
 
+        report_progress(step_ranges.get('injuries', (0, 0))[1], 'Injuries complete')
         status_str = "OK" if injury_stats.get('success') else f"FAILED: {injury_stats.get('error', 'Unknown')}"
         print(f"    Status: {status_str}")
         print(f"    Time: {step_time:.1f}s")
@@ -527,6 +512,7 @@ def run_sync_pipeline(
     if with_elo:
         step_name = "ELO Cache"
         print(f"\n[5] {step_name}...")
+        report_progress(step_ranges.get('elo', (0, 0))[0], 'Caching ELO ratings...')
 
         step_start = time.time()
         elo_stats = run_elo_cache(
@@ -541,6 +527,7 @@ def run_sync_pipeline(
             'time': step_time
         }
 
+        report_progress(step_ranges.get('elo', (0, 0))[1], 'ELO cache complete')
         status_str = "OK" if elo_stats.get('success') else f"FAILED: {elo_stats.get('error', 'Unknown')}"
         print(f"    Status: {status_str}")
         print(f"    Time: {step_time:.1f}s")
@@ -557,6 +544,8 @@ def run_sync_pipeline(
         print(f"  Mode: DRY RUN (no changes made)")
     print(f"{'='*60}\n")
 
+    report_progress(100, 'Sync pipeline complete')
+
     return results
 
 
@@ -568,11 +557,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python -m nba_app.core.pipeline.sync_pipeline nba --date 2024-01-15
-    python -m nba_app.core.pipeline.sync_pipeline cbb --date-range 2024-01-01,2024-01-31
-    python -m nba_app.core.pipeline.sync_pipeline nba --season 2024-2025
-    python -m nba_app.core.pipeline.sync_pipeline nba --season 2024-2025 --with-injuries
-    python -m nba_app.core.pipeline.sync_pipeline nba --only games,player_stats --dry-run
+    python -m bball_app.core.pipeline.sync_pipeline nba --date 2024-01-15
+    python -m bball_app.core.pipeline.sync_pipeline cbb --date-range 2024-01-01,2024-01-31
+    python -m bball_app.core.pipeline.sync_pipeline nba --season 2024-2025
+    python -m bball_app.core.pipeline.sync_pipeline nba --season 2024-2025 --with-injuries
+    python -m bball_app.core.pipeline.sync_pipeline nba --only games,player_stats --dry-run
 
 Data Types:
     games           Game box scores from ESPN scoreboard

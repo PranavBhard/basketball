@@ -13,7 +13,7 @@ parent_of_nba_app = os.path.dirname(nba_app_dir)  # Directory containing nba_app
 if parent_of_nba_app not in sys.path:
     sys.path.insert(0, parent_of_nba_app)
 
-from nba_app.core.mongo import Mongo
+from bball_app.core.mongo import Mongo
 
 def test_mongodb_aggregation_types():
     """Test if MongoDB aggregation preserves string types for player_id."""

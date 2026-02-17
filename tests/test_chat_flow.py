@@ -23,8 +23,8 @@ if parent_of_nba_app not in sys.path:
     sys.path.insert(0, parent_of_nba_app)
 
 # Now imports with nba_app prefix should work
-from nba_app.core.mongo import Mongo
-from nba_app.agents.modeler.modeler_agent import ModelerAgent
+from bball_app.core.mongo import Mongo
+from bball_app.agents.modeler.modeler_agent import ModelerAgent
 from langchain_core.messages import HumanMessage, AIMessage
 
 
@@ -115,7 +115,7 @@ def test_chat_flow(session_id: str, test_message: str = None):
     
     # Directly call build_dataset tool to replicate the error
     # This bypasses the LangChain agent and calls the tool directly
-    from nba_app.agents.tools.dataset_builder import DatasetBuilder
+    from bball_app.core.training.dataset_builder import DatasetBuilder
     
     dataset_builder = DatasetBuilder(db=db)
     

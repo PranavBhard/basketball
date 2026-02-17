@@ -37,7 +37,7 @@ import glob
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nba_app.core.features.registry import FeatureRegistry, FeatureGroups
+from bball_app.core.features.registry import FeatureRegistry, FeatureGroups
 
 
 # =============================================================================

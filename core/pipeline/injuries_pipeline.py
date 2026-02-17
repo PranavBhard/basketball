@@ -5,10 +5,10 @@ Injury computation pipeline with parallel season processing.
 Computes and updates injured_players for games based on roster vs played analysis.
 
 Usage:
-    python -m nba_app.core.pipeline.injuries_pipeline nba
-    python -m nba_app.core.pipeline.injuries_pipeline cbb --workers 4
-    python -m nba_app.core.pipeline.injuries_pipeline cbb --season 2024-2025
-    python -m nba_app.core.pipeline.injuries_pipeline nba --date-range 2024-01-01,2024-01-31
+    python -m bball_app.core.pipeline.injuries_pipeline nba
+    python -m bball_app.core.pipeline.injuries_pipeline cbb --workers 4
+    python -m bball_app.core.pipeline.injuries_pipeline cbb --season 2024-2025
+    python -m bball_app.core.pipeline.injuries_pipeline nba --date-range 2024-01-01,2024-01-31
 """
 
 import argparse
@@ -29,9 +29,9 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
-from nba_app.core.mongo import Mongo
-from nba_app.core.injury_manager import InjuryManager
+from bball_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
+from bball_app.core.mongo import Mongo
+from bball_app.core.injury_manager import InjuryManager
 
 
 class Status(Enum):
@@ -297,7 +297,7 @@ def run_injuries_pipeline(
     mongo = Mongo()
 
     # Get league-specific database proxy
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
     db = LeagueDbProxy(mongo.db, league_config)
 
     # Create injury manager
@@ -420,11 +420,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python -m nba_app.core.pipeline.injuries_pipeline nba
-    python -m nba_app.core.pipeline.injuries_pipeline cbb --workers 4
-    python -m nba_app.core.pipeline.injuries_pipeline cbb --season 2024-2025
-    python -m nba_app.core.pipeline.injuries_pipeline nba --date 2024-01-15
-    python -m nba_app.core.pipeline.injuries_pipeline nba --date-range 2024-01-01,2024-01-31
+    python -m bball_app.core.pipeline.injuries_pipeline nba
+    python -m bball_app.core.pipeline.injuries_pipeline cbb --workers 4
+    python -m bball_app.core.pipeline.injuries_pipeline cbb --season 2024-2025
+    python -m bball_app.core.pipeline.injuries_pipeline nba --date 2024-01-15
+    python -m bball_app.core.pipeline.injuries_pipeline nba --date-range 2024-01-01,2024-01-31
         """
     )
 

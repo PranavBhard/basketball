@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from nba_app.core.data.espn_client import ESPNClient
+from bball_app.core.data.espn_client import ESPNClient
 
 
 def extract_pregame_lines_from_summary(game_summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:

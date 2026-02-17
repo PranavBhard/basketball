@@ -8,7 +8,7 @@ This module provides a simplified interface for common operations.
 from typing import Dict, List, Optional
 import hashlib
 
-from nba_app.core.features.registry import FeatureRegistry, FeatureGroups
+from bball_app.core.features.registry import FeatureRegistry, FeatureGroups
 
 
 class FeatureManager:
@@ -16,7 +16,7 @@ class FeatureManager:
     Feature management wrapper around FeatureRegistry.
 
     For full feature definition access, use FeatureRegistry directly:
-        from nba_app.core.feature_registry import FeatureRegistry
+        from bball_app.core.feature_registry import FeatureRegistry
     """
 
     @staticmethod

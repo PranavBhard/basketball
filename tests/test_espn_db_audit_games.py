@@ -48,9 +48,9 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.data import GamesRepository, ESPNClient
-from nba_app.config import config as app_config
+from bball_app.core.mongo import Mongo
+from bball_app.core.data import GamesRepository, ESPNClient
+from bball_app.config import config as app_config
 
 
 NBA_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"

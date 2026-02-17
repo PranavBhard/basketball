@@ -93,9 +93,9 @@ def _scan_nonzero(df: pd.DataFrame, targets: List[str]) -> Dict[str, int]:
 
 
 def main() -> int:
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.services.training_data import MASTER_TRAINING_PATH
-    from nba_app.cli.populate_master_training_cols import populate_columns
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.services.training_data import MASTER_TRAINING_PATH
+    from bball_app.cli.populate_master_training_cols import populate_columns
 
     sample_size = int(os.environ.get("INJ_SAMPLE_SIZE", "2000"))
     game_limit = int(os.environ.get("INJ_GAME_LIMIT", "10000"))

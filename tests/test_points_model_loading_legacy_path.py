@@ -53,7 +53,7 @@ class DummyRegressor:
 
 
 def main() -> int:
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     with tempfile.TemporaryDirectory() as td:
         model_name = "unit_test_points_model"

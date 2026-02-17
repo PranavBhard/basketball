@@ -15,13 +15,13 @@ from bson import ObjectId
 from .base import BaseRepository
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 class ClassifierConfigRepository(BaseRepository):
     """Repository for model_config_nba collection (classifier models)."""
 
-    collection_name = 'model_config_nba'
+    collection_name = 'nba_model_config'
 
     def __init__(
         self,
@@ -61,7 +61,16 @@ class ClassifierConfigRepository(BaseRepository):
 
     def find_ensembles(self) -> List[Dict]:
         """Get all ensemble configurations."""
-        return self.find({'ensemble': True}, sort=[('trained_at', -1)])
+        return self.find({'ensemble_models': {'$exists': True}}, sort=[('trained_at', -1)])
+
+    def find_by_ids(self, ids: List[str], projection: Optional[Dict] = None) -> List[Dict]:
+        """Batch-fetch documents by a list of string ObjectId values."""
+        if not ids:
+            return []
+        return self.find(
+            {'_id': {'$in': [ObjectId(i) for i in ids]}},
+            projection=projection,
+        )
 
     def find_by_model_type(self, model_type: str) -> List[Dict]:
         """Find configs by model type."""

@@ -6,22 +6,22 @@ attribute names (e.g., db.stats_nba) or normalized names (e.g., db.games), resol
 them via the active league's YAML configuration.
 
 Usage:
-    from nba_app.core.data.league_db_proxy import LeagueDbProxy
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.league_config import load_league_config
+    from bball_app.core.data.league_db_proxy import LeagueDbProxy
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.league_config import load_league_config
 
     league = load_league_config('nba')
     db = LeagueDbProxy(Mongo().db, league)
 
     # Both work — attribute access resolves through league config:
     db.stats_nba          # -> db['stats_nba'] (from league.collections['games'])
-    db.player_stats       # -> db['stats_nba_players'] (from league.collections['player_stats'])
+    db.player_stats       # -> db['nba_player_stats'] (from league.collections['player_stats'])
 """
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 class LeagueDbProxy:

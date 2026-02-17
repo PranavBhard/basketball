@@ -8,9 +8,9 @@ Uses SharedFeatureContext for efficient parallel processing:
 - Thread-safe progress tracking
 
 Usage:
-    python -m nba_app.core.pipeline.training_pipeline nba
-    python -m nba_app.core.pipeline.training_pipeline cbb --workers 16
-    python -m nba_app.core.pipeline.training_pipeline nba --season 2024-2025
+    python -m bball_app.core.pipeline.training_pipeline nba
+    python -m bball_app.core.pipeline.training_pipeline cbb --workers 16
+    python -m bball_app.core.pipeline.training_pipeline nba --season 2024-2025
 """
 
 import argparse
@@ -31,10 +31,10 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.league_config import load_league_config, get_available_leagues
-from nba_app.core.pipeline.config import PipelineConfig, TrainingConfig
-from nba_app.core.pipeline.shared_context import SharedFeatureContext
-from nba_app.core.features.registry import FeatureRegistry, FeatureGroups
+from bball_app.core.league_config import load_league_config, get_available_leagues
+from bball_app.core.pipeline.config import PipelineConfig, TrainingConfig
+from bball_app.core.pipeline.shared_context import SharedFeatureContext
+from bball_app.core.features.registry import FeatureRegistry, FeatureGroups
 
 
 class PointsModelPredictor:
@@ -71,7 +71,7 @@ class PointsModelPredictor:
         import pickle
         import json
 
-        from nba_app.core.data.models import PointsConfigRepository
+        from bball_app.core.data.models import PointsConfigRepository
 
         # Get selected points config (single DB query)
         repo = PointsConfigRepository(self.db, league=self.league_config)
@@ -244,7 +244,7 @@ class PointsModelPredictor:
         return df
 
 
-def expand_feature_patterns(feature_specs: List[str]) -> List[str]:
+def expand_feature_patterns(feature_specs: List[str], league=None) -> List[str]:
     """
     Expand feature patterns (wildcards) to actual feature names.
 
@@ -257,12 +257,13 @@ def expand_feature_patterns(feature_specs: List[str]) -> List[str]:
 
     Args:
         feature_specs: List of feature names or patterns (may contain * wildcards)
+        league: Optional LeagueConfig to include league-specific features
 
     Returns:
         List of expanded feature names (duplicates removed, order preserved)
     """
     # Get all valid features from registry (FeatureGroups has the full enumeration)
-    all_features = FeatureGroups.get_all_features_flat(include_side=True)
+    all_features = FeatureGroups.get_all_features_flat(include_side=True, league=league)
 
     expanded = []
     seen = set()
@@ -649,7 +650,7 @@ def load_games_for_training(
     Returns:
         DataFrame with game rows ready for feature generation
     """
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.mongo import Mongo
 
     mongo = Mongo()
     db = mongo.db
@@ -684,6 +685,11 @@ def load_games_for_training(
         'homeWon': 1,
         '_id': 0
     }
+
+    # When limit is set, skip early-season (Oct/Nov) games — too little
+    # historical data for meaningful features, wastes the limited budget
+    if limit:
+        query['month'] = {'$nin': [10, 11]}
 
     print(f"Loading games from {games_collection}...")
     cursor = db[games_collection].find(query, projection).sort('date', 1)
@@ -725,10 +731,11 @@ def get_default_features(config: PipelineConfig) -> List[str]:
     - Player features (PER) if enabled
     - Injury features if enabled
     """
-    from nba_app.core.services.training_data import get_all_possible_features
+    from bball_app.core.services.training_data import TrainingDataService
 
-    # Get base features from master_training_data module
-    features = get_all_possible_features()
+    # Get base features from training data service (league-aware)
+    service = TrainingDataService(league=config.league)
+    features = service.get_all_possible_features()
 
     # Filter based on config
     if not config.training.include_player_features:
@@ -748,14 +755,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python -m nba_app.core.pipeline.training_pipeline nba
-    python -m nba_app.core.pipeline.training_pipeline cbb --workers 16
-    python -m nba_app.core.pipeline.training_pipeline nba --season 2024-2025
-    python -m nba_app.core.pipeline.training_pipeline cbb --no-player
-    python -m nba_app.core.pipeline.training_pipeline nba --features "elo_rating|none|raw|home,elo_rating|none|raw|away"
-    python -m nba_app.core.pipeline.training_pipeline nba --add --features "col1,col2"  # Update columns only
-    python -m nba_app.core.pipeline.training_pipeline nba --add --season 2024-2025     # Replace season rows
-    python -m nba_app.core.pipeline.training_pipeline nba --add --seasons "2023-2024,2024-2025"
+    python -m bball_app.core.pipeline.training_pipeline nba
+    python -m bball_app.core.pipeline.training_pipeline cbb --workers 16
+    python -m bball_app.core.pipeline.training_pipeline nba --season 2024-2025
+    python -m bball_app.core.pipeline.training_pipeline cbb --no-player
+    python -m bball_app.core.pipeline.training_pipeline nba --features "elo_rating|none|raw|home,elo_rating|none|raw|away"
+    python -m bball_app.core.pipeline.training_pipeline nba --add --features "col1,col2"  # Update columns only
+    python -m bball_app.core.pipeline.training_pipeline nba --add --season 2024-2025     # Replace season rows
+    python -m bball_app.core.pipeline.training_pipeline nba --add --seasons "2023-2024,2024-2025"
         """
     )
     parser.add_argument("league", choices=available_leagues,
@@ -780,16 +787,18 @@ Examples:
                        help="Comma-separated list of feature names to generate (default: all features)")
     parser.add_argument("--seasons", type=str, default=None,
                        help="Comma-separated list of seasons (e.g., '2023-2024,2024-2025')")
+    parser.add_argument("--exclude-features", type=str, default=None,
+                       help="Comma-separated list of feature names or patterns to EXCLUDE (e.g., 'player_*,inj_*')")
     parser.add_argument("--add", action="store_true",
                        help="Add/update to existing CSV: with --features updates columns, with --season/--seasons replaces season rows")
     args = parser.parse_args()
 
     # Validate --add usage
     if args.add:
-        has_features = args.features is not None
+        has_features = args.features is not None or args.exclude_features is not None
         has_seasons = args.season is not None or args.seasons is not None
         if not has_features and not has_seasons:
-            parser.error("--add requires --features (to update columns) or --season/--seasons (to replace season rows)")
+            parser.error("--add requires --features/--exclude-features (to update columns) or --season/--seasons (to replace season rows)")
 
     # Load league config
     league_config = load_league_config(args.league)
@@ -827,7 +836,10 @@ Examples:
     print(f"  Chunk size:  {config.training.chunk_size}")
     print(f"  Player feat: {'No' if not config.training.include_player_features else 'Yes'}")
     if args.add:
-        if args.features and not (args.season or args.seasons):
+        has_feature_filter = args.features or args.exclude_features
+        if has_feature_filter and (args.season or args.seasons):
+            print(f"  Mode:        ADD/UPDATE columns for specific seasons only")
+        elif has_feature_filter:
             print(f"  Mode:        ADD/UPDATE columns in existing CSV")
         elif args.season or args.seasons:
             print(f"  Mode:        ADD/REPLACE season rows in existing CSV")
@@ -850,6 +862,8 @@ Examples:
             print(f"  Features:    {len(feature_list)} specified")
     else:
         print(f"  Features:    all (default)")
+    if args.exclude_features:
+        print(f"  Excluding:   {args.exclude_features}")
     print(f"  Output:      {output_path}")
     print("=" * 70 + "\n")
 
@@ -888,9 +902,15 @@ Examples:
     elif args.season:
         target_seasons = [args.season]
 
+    # Track feature columns from existing CSV (for --add --seasons without --features)
+    existing_feature_cols = None
+
     # Load data - different modes
-    if args.add and args.features and not target_seasons:
+    if args.add and (args.features or args.exclude_features):
         # --add --features mode: Load existing CSV and update columns only
+        # Works with or without --season/--seasons:
+        #   without seasons: updates specified features for ALL rows
+        #   with seasons: updates specified features for ONLY target season rows
         if not os.path.exists(output_path):
             print(f"Error: --add requires existing CSV at {output_path}")
             return 1
@@ -903,10 +923,10 @@ Examples:
             df['Season'] = df.apply(infer_season_from_row, axis=1)
             print(f"Inferred Season column from Year/Month")
 
-        # Apply limit if specified
-        if args.limit:
-            df = df.head(args.limit)
-            print(f"Limited to {len(df):,} rows")
+        if target_seasons:
+            season_mask = df['Season'].isin(target_seasons)
+            print(f"Will update features for {season_mask.sum():,} rows in seasons: {target_seasons}")
+            print(f"  Preserving all other rows and columns unchanged")
 
     elif args.add and target_seasons:
         # --add --season/--seasons mode: Replace season rows in existing CSV
@@ -916,6 +936,15 @@ Examples:
         print(f"Loading existing CSV: {output_path}")
         existing_df = pd.read_csv(output_path)
         print(f"Loaded {len(existing_df):,} rows from existing CSV")
+
+        # Extract feature columns from existing CSV (for use when --features not specified)
+        # Exclude metadata and target columns
+        metadata_cols = {'Year', 'Month', 'Day', 'Home', 'Away', 'game_id', 'Season', 'Date'}
+        target_cols = {'HomeWon', 'home_points', 'away_points'}
+        pred_cols = {'pred_home_points', 'pred_away_points', 'pred_margin', 'pred_point_total'}
+        exclude_cols = metadata_cols | target_cols | pred_cols
+        existing_feature_cols = [c for c in existing_df.columns if c not in exclude_cols]
+        print(f"Detected {len(existing_feature_cols)} feature columns in existing CSV")
 
         # Infer Season column if not present
         if 'Season' not in existing_df.columns and 'Year' in existing_df.columns and 'Month' in existing_df.columns:
@@ -971,11 +1000,6 @@ Examples:
                 df = df.sort_values(['Year', 'Month', 'Day']).reset_index(drop=True)
                 print(f"Sorted chronologically")
 
-        # Apply limit if specified (for testing)
-        if args.limit:
-            df = df.head(args.limit)
-            print(f"Limited to {len(df):,} rows")
-
     elif target_seasons:
         # Normal mode with specific seasons (--season or --seasons without --add)
         print(f"Loading games for specific seasons: {target_seasons}")
@@ -991,11 +1015,6 @@ Examples:
         else:
             df = pd.DataFrame()
 
-        # Apply limit if specified
-        if args.limit:
-            df = df.head(args.limit)
-            print(f"Limited to {len(df):,} rows")
-
     else:
         # Normal mode: Load games from DB using min_season
         # Debug: this path is taken when neither --season nor --seasons is specified
@@ -1007,6 +1026,28 @@ Examples:
             min_season=effective_min_season,
             limit=args.limit,
         )
+
+    # When --limit is used, skip early-season games (Oct/Nov) which have
+    # too little historical data for meaningful feature calculation.
+    # Filter BEFORE applying limit so the limit budget isn't wasted on Oct/Nov.
+    if args.limit and not df.empty:
+        # Determine month column: 'Month' for existing CSVs, parsed from 'Date' for fresh loads
+        if 'Month' in df.columns:
+            month_series = df['Month'].astype(int)
+        elif 'Date' in df.columns:
+            month_series = pd.to_datetime(df['Date'], errors='coerce').dt.month
+        else:
+            month_series = None
+
+        if month_series is not None:
+            before = len(df)
+            df = df[~month_series.isin([10, 11])].reset_index(drop=True)
+            skipped = before - len(df)
+            if skipped > 0:
+                print(f"Skipped {skipped:,} early-season (Oct/Nov) games (--limit mode)")
+
+        df = df.head(args.limit)
+        print(f"Limited to {len(df):,} rows")
 
     if df.empty:
         print("No games found matching criteria")
@@ -1032,7 +1073,7 @@ Examples:
 
         if has_patterns:
             print(f"Expanding {len(feature_specs)} feature patterns...")
-            features = expand_feature_patterns(feature_specs)
+            features = expand_feature_patterns(feature_specs, league=league_config)
         else:
             # No patterns - use as-is (deduplicate while preserving order)
             seen = set()
@@ -1043,12 +1084,26 @@ Examples:
                     seen.add(f)
 
         print(f"Using {len(features)} user-specified features")
+    elif existing_feature_cols is not None:
+        # --add --seasons mode without --features: use features from existing CSV
+        features = existing_feature_cols
+        print(f"Using {len(features)} features from existing CSV")
     else:
         features = get_default_features(config)
+
+    # Apply --exclude-features filter
+    if args.exclude_features:
+        exclude_specs = [s.strip() for s in args.exclude_features.split(',') if s.strip()]
+        before_count = len(features)
+        features = [f for f in features
+                    if not any(fnmatch.fnmatch(f, pat) for pat in exclude_specs)]
+        excluded_count = before_count - len(features)
+        print(f"Excluded {excluded_count} features matching: {', '.join(exclude_specs)}")
+
     print(f"Features to generate: {len(features)}")
 
     # Determine if this is a "features only" add (preserve structure) or full regeneration
-    is_features_only_add = args.add and args.features and not target_seasons
+    is_features_only_add = args.add and (args.features or args.exclude_features)
 
     # Track which columns are new vs updated (for --add --features mode reporting)
     if is_features_only_add:
@@ -1067,6 +1122,8 @@ Examples:
     if is_features_only_add:
         # --add --features mode: Just save with updated columns (preserve existing structure)
         print(f"\nColumns added: {len(new_cols)}, updated: {len(updated_cols)}")
+        if target_seasons:
+            print(f"Seasons updated: {', '.join(target_seasons)}")
     else:
         # Normal mode or --add --season/--seasons: Add metadata columns and reorder
 

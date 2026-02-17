@@ -63,7 +63,7 @@ def test_stacking_tool_config_ids():
     print("\n🧪 Testing stacking tool with MongoDB config IDs...")
     
     try:
-        from nba_app.agents.tools.stacking_tool import StackingTrainer
+        from bball_app.core.training.stacking_trainer import StackingTrainer
         
         # Create mock stacking trainer
         stacking_trainer = StackingTrainer()

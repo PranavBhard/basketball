@@ -13,6 +13,7 @@ lxml>=4.6.0
 python-dateutil>=2.8.0
 trafilatura>=1.6.0
 readability-lxml>=0.8.1
+cryptography>=46.0.4
 
 # Optional ML libraries (uncomment if needed)
 # Note: These are optional - the code handles their absence gracefully

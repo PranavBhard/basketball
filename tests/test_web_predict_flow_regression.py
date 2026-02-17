@@ -163,13 +163,13 @@ def test_web_predict_flow_regression(game_id: str = "401810422") -> bool:
     fake_db = _FakeDB(selected_classifier_config=selected_classifier_config)
 
     # Patch Mongo before importing the web module, since it instantiates Mongo() at import time.
-    with mock.patch('nba_app.core.mongo.Mongo', autospec=True) as MongoPatched:
+    with mock.patch('bball_app.core.mongo.Mongo', autospec=True) as MongoPatched:
         MongoPatched.return_value = SimpleNamespace(db=fake_db)
 
         # Import web.app fresh (in case a prior import exists in the interpreter)
-        if 'nba_app.web.app' in sys.modules:
-            del sys.modules['nba_app.web.app']
-        web_app = importlib.import_module('nba_app.web.app')
+        if 'bball_app.web.app' in sys.modules:
+            del sys.modules['bball_app.web.app']
+        web_app = importlib.import_module('bball_app.web.app')
 
     # Hard-override heavyweight pieces to keep the test deterministic.
     web_app.BballModel = _FakeBballModel
@@ -180,7 +180,7 @@ def test_web_predict_flow_regression(game_id: str = "401810422") -> bool:
         feature_names = ['points|season|avg|diff']
         return dummy_model, dummy_scaler, feature_names
 
-    web_app.ModelFactory.create_model = staticmethod(_fake_create_model)
+    web_app.ArtifactLoader.create_model = staticmethod(_fake_create_model)
 
     def _fake_build_player_lists_for_prediction(home_team, away_team, season, game_id, db):
         return {
@@ -195,8 +195,8 @@ def test_web_predict_flow_regression(game_id: str = "401810422") -> bool:
     assert hasattr(web_app, '_nba_model')
     assert hasattr(web_app, '_nba_model_config_hash')
 
-    # Exercise get_nba_model() directly.
-    model = web_app.get_nba_model()
+    # Exercise get_bball_model() directly.
+    model = web_app.get_bball_model()
     assert model is not None
 
     # Exercise the Flask endpoint flow.

@@ -19,6 +19,7 @@
 #   --skip-espn         Skip ESPN data pull
 #   --skip-training     Skip master training generation
 #   --skip-post         Skip post-processing
+#   --skip-rosters      Skip roster build
 #   --dry-run           Show what would be done
 #   -v, --verbose       Show detailed output
 #
@@ -51,7 +52,7 @@ cd "$(dirname "$0")/.."
 source ./setup.sh
 
 # Set Python path
-export PYTHONPATH=/Users/pranav/Documents/NBA
+export PYTHONPATH=/Users/pranav/Documents/basketball
 
 # Run the full pipeline
-python -m nba_app.core.pipeline.full_pipeline "$LEAGUE" "$@"
+python -m bball_app.core.pipeline.full_pipeline "$LEAGUE" "$@"

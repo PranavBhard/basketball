@@ -37,13 +37,13 @@ class ModelBusinessLogic:
                 }
             
             # Create model using unified factory
-            from .model_factory import ModelFactory
-            model, scaler, feature_names = ModelFactory.create_model(config, use_artifacts=False)
+            from ..models.artifact_loader import ArtifactLoader
+            model, scaler, feature_names = ArtifactLoader.create_model(config, use_artifacts=False)
             
             # Save artifacts for future fast loading
             run_id = config.get('run_id')
             if run_id:
-                ModelFactory.save_model_artifacts(model, scaler, feature_names, config, run_id)
+                ArtifactLoader.save_model_artifacts(model, scaler, feature_names, config, run_id)
             
             # Calculate training metrics
             training_metrics = ModelBusinessLogic._calculate_training_metrics(model, scaler, feature_names)

@@ -13,8 +13,8 @@ Stores results in MongoDB collection `cached_league_stats`.
 import argparse
 from datetime import datetime
 from typing import Dict, List, Optional
-from nba_app.core.mongo import Mongo
-from nba_app.core.league_config import load_league_config
+from bball_app.core.mongo import Mongo
+from bball_app.core.league_config import load_league_config
 
 
 # Defaults (NBA). Multi-league callers should pass a league config.
@@ -391,10 +391,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m nba_app.core.cache_league_stats                     # Cache all seasons
-  python -m nba_app.core.cache_league_stats --season 2024-2025  # Cache specific season
-  python -m nba_app.core.cache_league_stats --list              # List cached seasons
-  python -m nba_app.core.cache_league_stats --force             # Force recalculation
+  python -m bball_app.core.cache_league_stats                     # Cache all seasons
+  python -m bball_app.core.cache_league_stats --season 2024-2025  # Cache specific season
+  python -m bball_app.core.cache_league_stats --list              # List cached seasons
+  python -m bball_app.core.cache_league_stats --force             # Force recalculation
         """
     )
 

@@ -11,7 +11,7 @@ import csv
 
 import pandas as pd
 
-from nba_app.core.training.constants import (
+from bball_app.core.training.constants import (
     MODEL_CACHE_FILE,
     MODEL_CACHE_FILE_NO_PER,
     OUTPUTS_DIR,

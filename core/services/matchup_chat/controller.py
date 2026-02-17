@@ -5,10 +5,10 @@ import hashlib
 import re
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
-from nba_app.core.services.matchup_chat.context_repository import SharedContextRepository
-from nba_app.core.services.matchup_chat.prediction_bootstrap import ensure_shared_context_baseline
-from nba_app.core.services.matchup_chat.tool_cache import ToolCache
-from nba_app.core.services.matchup_chat.schemas import (
+from bball_app.core.services.matchup_chat.context_repository import SharedContextRepository
+from bball_app.core.services.matchup_chat.prediction_bootstrap import ensure_shared_context_baseline
+from bball_app.core.services.matchup_chat.tool_cache import ToolCache
+from bball_app.core.services.matchup_chat.schemas import (
     AgentAction,
     ControllerOptions,
     HistoryEntry,
@@ -17,7 +17,7 @@ from nba_app.core.services.matchup_chat.schemas import (
     utc_now_iso,
 )
 
-from nba_app.agents.utils.json_compression import encode_message_content, encode_tool_output
+from bball_app.agents.utils.json_compression import encode_message_content, encode_tool_output
 
 
 class Controller:
@@ -72,7 +72,7 @@ class Controller:
         # 2) Planner (LLM) -> JSON plan (fallback if invalid/unavailable)
         turn_plan: TurnPlan
         try:
-            from nba_app.agents.matchup_network.planner_agent import plan_turn
+            from bball_app.agents.matchup_network.planner_agent import plan_turn
 
             planner_shared = self._shared_context_for_agent("planner", shared)
             turn_plan = plan_turn(
@@ -96,7 +96,7 @@ class Controller:
 
         # Record planner output with system ref (for debugging/traceability)
         try:
-            from nba_app.agents.matchup_network.base import load_rendered_system_message
+            from bball_app.agents.matchup_network.base import load_rendered_system_message
 
             planner_system = load_rendered_system_message("planner")
             planner_system_ref = f"rendered:planner.txt sha256:{hashlib.sha256(planner_system.encode('utf-8')).hexdigest()[:12]}"
@@ -306,7 +306,7 @@ class Controller:
 
         # 4) Final synthesis (LLM; fallback if unavailable)
         try:
-            from nba_app.agents.matchup_network.final_synthesizer_agent import synthesize
+            from bball_app.agents.matchup_network.final_synthesizer_agent import synthesize
 
             final_text = synthesize(
                 shared_context=self._shared_context_for_agent("final_synthesizer", self.repo.get(game_id) or shared),
@@ -330,7 +330,7 @@ class Controller:
                 workflow_outputs=workflow_outputs,
             )
         try:
-            from nba_app.agents.matchup_network.base import load_rendered_system_message
+            from bball_app.agents.matchup_network.base import load_rendered_system_message
 
             fs_system = load_rendered_system_message("final_synthesizer")
             fs_system_ref = f"rendered:final_synthesizer.txt sha256:{hashlib.sha256(fs_system.encode('utf-8')).hexdigest()[:12]}"
@@ -542,8 +542,8 @@ class Controller:
 
         Uses LangChain tool calling when available; falls back to the old stub runner otherwise.
         """
-        from nba_app.agents.matchup_network.base import load_rendered_system_message
-        from nba_app.agents.matchup_network.runtime import LANGCHAIN_AVAILABLE, build_tool, run_agent_with_tools
+        from bball_app.agents.matchup_network.base import load_rendered_system_message
+        from bball_app.agents.matchup_network.runtime import LANGCHAIN_AVAILABLE, build_tool, run_agent_with_tools
         from pydantic import BaseModel
 
         # If tool-calling runtime isn't available, fall back to deterministic stub behavior.
@@ -684,7 +684,7 @@ class Controller:
 
         tools = []
         if agent == "research_media_agent":
-            from nba_app.agents.tools.news_tools import get_game_news, get_team_news, get_player_news, web_search
+            from bball_app.core.services.news_tools import get_game_news, get_team_news, get_player_news, web_search
 
             def _get_game_news(game_id: str = game_id, force_refresh: bool = False):
                 return get_game_news(
@@ -766,13 +766,13 @@ class Controller:
             ]
 
         elif agent == "stats_agent":
-            from nba_app.agents.tools.lineup_tools import get_lineups
-            from nba_app.agents.tools.team_game_window_tools import (
+            from bball_app.core.services.lineup_service import get_lineups
+            from bball_app.agents.tools.team_game_window_tools import (
                 get_team_games, get_team_stats, compare_team_stats,
                 get_head_to_head_games, get_head_to_head_stats,
             )
-            from nba_app.agents.tools.window_player_stats_tools import get_player_stats, get_advanced_player_stats, get_rotation_stats
-            from nba_app.agents.tools.code_executor import CodeExecutor
+            from bball_app.agents.tools.window_player_stats_tools import get_player_stats, get_advanced_player_stats, get_rotation_stats
+            from bball_app.agents.tools.code_executor import CodeExecutor
 
             # Stats agent can optionally run code
             code_exec = CodeExecutor(db=self.db)
@@ -903,8 +903,8 @@ class Controller:
             ]
 
         elif agent == "experimenter":
-            from nba_app.agents.tools.lineup_tools import get_lineups
-            from nba_app.agents.tools.experimenter_tools import (
+            from bball_app.core.services.lineup_service import get_lineups
+            from bball_app.agents.tools.experimenter_tools import (
                 predict_game_and_persist,
                 set_player_lineup_bucket,
             )
@@ -950,7 +950,7 @@ class Controller:
             ]
 
         elif agent == "model_inspector":
-            from nba_app.agents.tools.model_inspector_tools import (
+            from bball_app.agents.tools.model_inspector_tools import (
                 get_base_model_direction_table,
                 get_ensemble_meta_model_params,
                 get_prediction_base_outputs,
@@ -1142,7 +1142,7 @@ class Controller:
 
         if agent == "model_inspector":
             # Minimal stub: fetch prediction doc directly from SSoT when shared context doesn't contain it
-            from nba_app.core.services.prediction import PredictionService
+            from bball_app.core.services.prediction import PredictionService
 
             svc = PredictionService(db=self.db, league=self.league)
             pred_info = svc.get_prediction_for_game(game_id) or {}
@@ -1164,7 +1164,7 @@ class Controller:
             return "\n".join(lines), tools
 
         if agent == "stats_agent":
-            from nba_app.agents.tools.game_tools import get_rosters
+            from bball_app.agents.tools.game_tools import get_rosters
 
             # Use roster tool as best-effort lineup/injury view (sync with prediction inputs is handled by core prediction flow)
             home_roster = get_rosters(home, db=self.db) if home else {}
@@ -1192,7 +1192,7 @@ class Controller:
             )
 
         if agent == "research_media_agent":
-            from nba_app.agents.tools.news_tools import get_game_news, get_team_news
+            from bball_app.core.services.news_tools import get_game_news, get_team_news
 
             game_id = shared.get("game_id", "")
             away_team_id = (game.get("away") or {}).get("team_id", "")

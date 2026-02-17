@@ -29,8 +29,8 @@ class InjuryManager:
     Manages injury detection and updates for NBA games.
 
     Usage:
-        from nba_app.core.injury_manager import InjuryManager
-        from nba_app.core.mongo import Mongo
+        from bball_app.core.injury_manager import InjuryManager
+        from bball_app.core.mongo import Mongo
 
         mongo = Mongo()
         injury_mgr = InjuryManager(mongo.db)
@@ -576,7 +576,7 @@ def get_injury_manager(db: Database = None) -> InjuryManager:
         InjuryManager instance
     """
     if db is None:
-        from nba_app.core.mongo import Mongo
+        from bball_app.core.mongo import Mongo
         db = Mongo().db
 
     return InjuryManager(db)

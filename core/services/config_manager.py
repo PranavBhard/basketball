@@ -16,10 +16,10 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 from bson import ObjectId
 
-from nba_app.core.data import ClassifierConfigRepository, PointsConfigRepository
+from bball_app.core.data import ClassifierConfigRepository, PointsConfigRepository
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 class ModelConfigManager:
@@ -33,7 +33,7 @@ class ModelConfigManager:
     """
 
     # Collection names (kept for backward compatibility)
-    CLASSIFIER_COLLECTION = 'model_config_nba'
+    CLASSIFIER_COLLECTION = 'nba_model_config'
     POINTS_COLLECTION = 'model_config_points_nba'
 
     def __init__(self, db, league: Optional["LeagueConfig"] = None):
@@ -63,8 +63,8 @@ class ModelConfigManager:
         sorted_features = sorted(features)
         return hashlib.md5(','.join(sorted_features).encode()).hexdigest()
 
+    @staticmethod
     def generate_config_hash(
-        self,
         model_type: str,
         feature_set_hash: str,
         c_value: float = None,
@@ -78,7 +78,8 @@ class ModelConfigManager:
         recency_decay_k: float = None,
         use_master: bool = True,
         min_games_played: int = 15,
-        target: str = None  # For points regression
+        target: str = None,  # For points regression
+        exclude_seasons: List[int] = None
     ) -> str:
         """
         Generate unique config hash from parameters.
@@ -115,6 +116,8 @@ class ModelConfigManager:
             parts.append(f"recency_decay_k:{recency_decay_k}")
         parts.append(f"use_master:{use_master}")
         parts.append(f"min_games_played:{min_games_played}")
+        if exclude_seasons:
+            parts.append(f"exclude_seasons:{','.join(map(str, sorted(exclude_seasons)))}")
         if target:
             parts.append(f"target:{target}")
 
@@ -137,6 +140,8 @@ class ModelConfigManager:
         evaluation_year: int = 2024,
         min_games_played: int = 15,
         include_injuries: bool = False,
+        recency_decay_k: float = None,
+        exclude_seasons: List[int] = None,
         use_master: bool = True,
         name: str = None,
         # Dataset spec fields (for reproducibility)
@@ -165,6 +170,8 @@ class ModelConfigManager:
             evaluation_year: Year for evaluation set
             min_games_played: Minimum games filter
             include_injuries: Include injury features
+            recency_decay_k: Injury recency decay parameter
+            exclude_seasons: Seasons to exclude from training
             use_master: Use master training CSV
             name: Optional custom name
             dataset_spec: Full dataset spec for reproducibility
@@ -192,8 +199,10 @@ class ModelConfigManager:
             begin_year=begin_year,
             evaluation_year=evaluation_year,
             include_injuries=include_injuries,
+            recency_decay_k=recency_decay_k,
             use_master=use_master,
-            min_games_played=min_games_played
+            min_games_played=min_games_played,
+            exclude_seasons=exclude_seasons,
         )
 
         # Auto-generate name if not provided
@@ -216,6 +225,8 @@ class ModelConfigManager:
             'evaluation_year': evaluation_year,
             'min_games_played': min_games_played,
             'include_injuries': include_injuries,
+            'recency_decay_k': recency_decay_k,
+            'exclude_seasons': exclude_seasons,
             'use_master': use_master,
             'ensemble': False,
             # Dataset reproducibility fields
@@ -358,7 +369,12 @@ class ModelConfigManager:
         training_csv: str = None,
         f_scores: Dict = None,
         feature_importances: Dict = None,
-        features: List[str] = None
+        features: List[str] = None,
+        c_values_grid: Dict = None,
+        best_c_value: float = None,
+        best_c_accuracy: float = None,
+        training_stats: Dict = None,
+        selected: bool = None
     ) -> bool:
         """
         Link experiment run results to a config.
@@ -379,11 +395,17 @@ class ModelConfigManager:
             f_scores: Dict of {feature_name: f_score} from ANOVA F-test
             feature_importances: Dict of {feature_name: importance_score} from model
             features: List of feature names used in training
+            c_values_grid: Dict of {c_value_str: accuracy} from grid search
+            best_c_value: Best C-value from grid search
+            best_c_accuracy: Accuracy at best C-value
+            training_stats: Dict with training metadata (total_games, flags, etc.)
+            selected: Whether to mark this config as selected after linking
 
         Returns:
             True if successful
         """
         repo = self._classifier_repo if config_type == 'classifier' else self._points_repo
+        collection_name = self.CLASSIFIER_COLLECTION if config_type == 'classifier' else self.POINTS_COLLECTION
 
         update_doc = {
             'run_id': run_id,
@@ -412,7 +434,7 @@ class ModelConfigManager:
 
         # Store F-scores as features_ranked (ANOVA F-test scores)
         if f_scores:
-            sorted_f_scores = sorted(f_scores.items(), key=lambda x: x[1], reverse=True)
+            sorted_f_scores = sorted(f_scores.items(), key=lambda x: x[1] if x[1] is not None else float('-inf'), reverse=True)
             features_ranked = []
             for rank, (name, score) in enumerate(sorted_f_scores, 1):
                 # Sanitize NaN/Inf values
@@ -427,7 +449,7 @@ class ModelConfigManager:
 
         # Store model importances as features_ranked_by_importance
         if feature_importances:
-            sorted_importances = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)
+            sorted_importances = sorted(feature_importances.items(), key=lambda x: x[1] if x[1] is not None else float('-inf'), reverse=True)
             features_ranked_by_importance = []
             for rank, (name, score) in enumerate(sorted_importances, 1):
                 # Sanitize NaN/Inf values
@@ -443,7 +465,8 @@ class ModelConfigManager:
         if artifacts:
             update_doc['model_artifact_path'] = artifacts.get('model_path')
             update_doc['scaler_artifact_path'] = artifacts.get('scaler_path')
-            update_doc['features_path'] = artifacts.get('features_path')
+            # ExperimentRunner uses 'feature_names_path', ArtifactLoader expects 'features_path'
+            update_doc['features_path'] = artifacts.get('features_path') or artifacts.get('feature_names_path')
             update_doc['artifacts_saved_at'] = datetime.utcnow()
 
         if dataset_id:
@@ -452,11 +475,28 @@ class ModelConfigManager:
         if training_csv:
             update_doc['training_csv'] = training_csv
 
+        # C-value grid search results
+        if c_values_grid is not None:
+            update_doc['c_values'] = c_values_grid
+        if best_c_value is not None:
+            update_doc['best_c_value'] = best_c_value
+        if best_c_accuracy is not None:
+            update_doc['best_c_accuracy'] = best_c_accuracy
+
+        # Training stats metadata
+        if training_stats is not None:
+            update_doc['training_stats'] = training_stats
+
         try:
             result = repo.update_one(
                 {'_id': ObjectId(config_id)},
                 {'$set': update_doc}
             )
+
+            # Handle selection after update
+            if selected:
+                self._safe_select(collection_name, config_id)
+
             return result.modified_count > 0
         except Exception as e:
             print(f"Error linking run to config: {e}")

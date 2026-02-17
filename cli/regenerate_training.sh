@@ -38,7 +38,7 @@ cd "$(dirname "$0")/.."
 source ./setup.sh
 
 # Set Python path
-export PYTHONPATH=/Users/pranav/Documents/NBA
+export PYTHONPATH=/Users/pranav/Documents/basketball
 
 # Run the regeneration script
 python cli/scripts/regenerate_training.py "$@"

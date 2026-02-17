@@ -13,7 +13,7 @@ Key dependency types:
 
 from typing import Dict, List, Set, Tuple, Optional
 import re
-from nba_app.core.features.registry import FeatureRegistry
+from bball_app.core.features.registry import FeatureRegistry
 
 
 # =============================================================================
@@ -121,67 +121,93 @@ def get_derived_stat_dependencies(feature_name: str) -> List[str]:
 
 def get_blend_dependencies(feature_name: str) -> List[str]:
     """
-    Get dependencies for blend features.
+    Get dependencies for blend features (new composite time_period format).
 
-    Blend features have format: {base_stat}_blend|none|blend:{tp1}:{w1}/{tp2}:{w2}/...|{perspective}
+    New format: stat|blend:tp1:w1/tp2:w2|calc_weight|perspective
+    Dependencies: [stat|tp1|calc_weight|perspective, stat|tp2|calc_weight|perspective]
 
     Args:
-        feature_name: Blend feature name
+        feature_name: Feature name with blend time_period
 
     Returns:
         List of component feature names this blend depends on
     """
-    if '|blend:' not in feature_name:
+    parsed = FeatureRegistry.parse_feature_name(feature_name)
+    if not parsed:
         return []
 
-    try:
-        parts = feature_name.split('|')
-        if len(parts) < 4:
-            return []
-
-        base_stat = parts[0]  # e.g., 'wins_blend'
-        calc_weight = parts[2]  # e.g., 'blend:season:0.80/games_12:0.20'
-        perspective = parts[3]
-
-        # Remove _blend suffix to get base stat
-        if base_stat.endswith('_blend'):
-            base_stat_name = base_stat[:-6]  # Remove '_blend'
-        else:
-            return []
-
-        # Parse blend components from calc_weight
-        # Format: blend:season:0.80/games_12:0.20
-        if not calc_weight.startswith('blend:'):
-            return []
-
-        blend_str = calc_weight[6:]  # Remove 'blend:' prefix
-        components = blend_str.split('/')
-
-        # Determine calc_weight for components based on base stat
-        # This should ideally come from the registry
-        if base_stat_name in ['wins', 'points_net']:
-            component_calc_weight = 'avg'
-        elif base_stat_name in ['off_rtg_net', 'efg_net']:
-            component_calc_weight = 'raw'
-        else:
-            component_calc_weight = 'avg'  # Default
-
-        # Build component feature names
-        dependencies = []
-        for component in components:
-            # Format: season:0.80 or games_12:0.20
-            if ':' not in component:
-                continue
-            component_time_period = component.split(':')[0]
-
-            # Build component feature name
-            component_feature = f"{base_stat_name}|{component_time_period}|{component_calc_weight}|{perspective}"
-            dependencies.append(component_feature)
-
-        return dependencies
-
-    except Exception:
+    time_period = parsed['time_period']
+    if not time_period.startswith('blend:'):
         return []
+
+    blend_parsed = FeatureRegistry.parse_blend_time_period(time_period)
+    if blend_parsed is None:
+        return []
+
+    stat_name = parsed['stat_name']
+    calc_weight = parsed['calc_weight']
+    perspective = parsed['perspective']
+    side_suffix = '|side' if parsed.get('has_side') else ''
+
+    dependencies = []
+    for tp, _ in blend_parsed['components']:
+        dep = f"{stat_name}|{tp}|{calc_weight}|{perspective}{side_suffix}"
+        dependencies.append(dep)
+
+    return dependencies
+
+
+def get_delta_dependencies(feature_name: str) -> List[str]:
+    """
+    Get dependencies for delta features (new composite time_period format).
+
+    Delta format: stat|delta:recent_tp-baseline_tp|calc_weight|perspective
+    Dependencies: [stat|recent_tp|..., stat|baseline_tp|...]
+
+    Blend-delta format: stat|delta:blend:tp1:w1/tp2:w2-baseline_tp|calc_weight|perspective
+    Dependencies: [stat|blend:tp1:w1/tp2:w2|..., stat|baseline_tp|...]
+
+    Args:
+        feature_name: Feature name with delta time_period
+
+    Returns:
+        List of component feature names this delta depends on
+    """
+    parsed = FeatureRegistry.parse_feature_name(feature_name)
+    if not parsed:
+        return []
+
+    time_period = parsed['time_period']
+    if not time_period.startswith('delta:'):
+        return []
+
+    delta_parsed = FeatureRegistry.parse_delta_time_period(time_period)
+    if delta_parsed is None:
+        return []
+
+    stat_name = parsed['stat_name']
+    calc_weight = parsed['calc_weight']
+    perspective = parsed['perspective']
+    side_suffix = '|side' if parsed.get('has_side') else ''
+
+    dependencies = []
+
+    # Recent dependency
+    if delta_parsed['type'] == 'blend_delta':
+        # Reconstruct the blend time_period string
+        recent_tp = 'blend:' + '/'.join(
+            f"{tp}:{w}" for tp, w in delta_parsed['recent']['components']
+        )
+    else:
+        recent_tp = delta_parsed['recent']
+
+    dependencies.append(f"{stat_name}|{recent_tp}|{calc_weight}|{perspective}{side_suffix}")
+
+    # Baseline dependency
+    baseline_tp = delta_parsed['baseline']
+    dependencies.append(f"{stat_name}|{baseline_tp}|{calc_weight}|{perspective}{side_suffix}")
+
+    return dependencies
 
 
 def get_net_stat_dependencies(feature_name: str) -> List[str]:
@@ -257,7 +283,12 @@ def get_direct_dependencies(feature_name: str) -> List[str]:
     if blend_deps:
         dependencies.extend(blend_deps)
 
-    # 5. Check net stat dependencies (if not already handled)
+    # 5. Check delta dependencies
+    delta_deps = get_delta_dependencies(feature_name)
+    if delta_deps:
+        dependencies.extend(delta_deps)
+
+    # 6. Check net stat dependencies (if not already handled)
     if not dependencies:
         net_deps = get_net_stat_dependencies(feature_name)
         dependencies.extend(net_deps)

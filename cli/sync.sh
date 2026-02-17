@@ -50,7 +50,7 @@ cd "$(dirname "$0")/.."
 source ./setup.sh
 
 # Set Python path
-export PYTHONPATH=/Users/pranav/Documents/NBA
+export PYTHONPATH=/Users/pranav/Documents/basketball
 
 # Run the sync pipeline
-python -m nba_app.core.pipeline.sync_pipeline "$LEAGUE" "$@"
+python -m bball_app.core.pipeline.sync_pipeline "$LEAGUE" "$@"

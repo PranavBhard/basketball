@@ -30,7 +30,7 @@ from enum import Enum
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nba_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
+from bball_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
 
 
 class Status(Enum):
@@ -503,8 +503,8 @@ Examples:
     print(f"\nTotal: {completed}/{len(state.seasons)} seasons completed successfully")
 
     if not args.skip_training and not args.dry_run:
-        csv_suffix = "_CBB" if league == "cbb" else ""
-        print(f"Master CSV: master_training/MASTER_TRAINING{csv_suffix}.csv")
+        csv_path = league_config.raw.get("paths", {}).get("master_training_csv", "master_training/MASTER_TRAINING.csv")
+        print(f"Master CSV: {csv_path}")
 
 
 if __name__ == "__main__":

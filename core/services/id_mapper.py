@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from nba_app.core.league_config import load_league_config, LeagueConfig
+from bball_app.core.league_config import load_league_config, LeagueConfig
 
 logger = logging.getLogger(__name__)
 

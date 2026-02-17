@@ -8,10 +8,10 @@ This script:
 3. Removes the headshot field from player_stats collection
 
 Usage:
-    python -m nba_app.cli.scripts.migrate_headshots_to_players <league>
-    python -m nba_app.cli.scripts.migrate_headshots_to_players nba
-    python -m nba_app.cli.scripts.migrate_headshots_to_players cbb
-    python -m nba_app.cli.scripts.migrate_headshots_to_players nba --dry-run
+    python -m bball_app.cli.scripts.migrate_headshots_to_players <league>
+    python -m bball_app.cli.scripts.migrate_headshots_to_players nba
+    python -m bball_app.cli.scripts.migrate_headshots_to_players cbb
+    python -m bball_app.cli.scripts.migrate_headshots_to_players nba --dry-run
 """
 
 import argparse
@@ -24,8 +24,8 @@ nba_app_dir = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
 if nba_app_dir not in sys.path:
     sys.path.insert(0, nba_app_dir)
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.league_config import load_league_config
+from bball_app.core.mongo import Mongo
+from bball_app.core.league_config import load_league_config
 
 
 def migrate_headshots(league_id: str, dry_run: bool = False):
@@ -45,8 +45,8 @@ def migrate_headshots(league_id: str, dry_run: bool = False):
     db = Mongo().db
 
     # Get collection names from league config
-    player_stats_collection = league.collections.get('player_stats', 'stats_nba_players')
-    players_collection = league.collections.get('players', 'players_nba')
+    player_stats_collection = league.collections.get('player_stats', 'nba_player_stats')
+    players_collection = league.collections.get('players', 'nba_players')
 
     print(f"Player stats collection: {player_stats_collection}")
     print(f"Players collection: {players_collection}")

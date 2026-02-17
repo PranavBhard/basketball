@@ -16,10 +16,10 @@ Uses data layer repositories for all database operations.
 from typing import Dict, List, Optional, Set
 from datetime import datetime
 
-from nba_app.core.stats.handler import StatHandlerV2
-from nba_app.core.stats.per_calculator import PERCalculator
-from nba_app.core.features.parser import parse_feature_name
-from nba_app.core.data import GamesRepository, RostersRepository
+from bball_app.core.stats.handler import StatHandlerV2
+from bball_app.core.stats.per_calculator import PERCalculator
+from bball_app.core.features.parser import parse_feature_name
+from bball_app.core.data import GamesRepository, RostersRepository
 
 
 class SharedFeatureGenerator:
@@ -50,18 +50,20 @@ class SharedFeatureGenerator:
         model1_values = [feature_dict.get(f, 0.0) for f in model1_features]
     """
 
-    def __init__(self, db, preload_venues: bool = True):
+    def __init__(self, db, preload_venues: bool = True, league=None):
         """
         Initialize the shared feature generator.
 
         Args:
             db: MongoDB database connection
             preload_venues: Whether to preload venue cache for travel features
+            league: Optional LeagueConfig for league-aware collection routing
         """
         self.db = db
+        self.league = league
         # Initialize repositories
-        self._games_repo = GamesRepository(db)
-        self._rosters_repo = RostersRepository(db)
+        self._games_repo = GamesRepository(db, league=league)
+        self._rosters_repo = RostersRepository(db, league=league)
 
         # Create shared stat handler (lazy load for minimal startup cost)
         self.stat_handler = StatHandlerV2(
@@ -69,7 +71,8 @@ class SharedFeatureGenerator:
             use_exponential_weighting=False,
             preloaded_games=None,
             db=db,
-            lazy_load=True
+            lazy_load=True,
+            league=league
         )
 
         # Preload venue cache for travel distance features
@@ -80,7 +83,7 @@ class SharedFeatureGenerator:
                 pass
 
         # Create shared PER calculator (no preload - queries on demand)
-        self.per_calculator = PERCalculator(db, preload=False)
+        self.per_calculator = PERCalculator(db, preload=False, league=league)
 
         # Track player lists for UI display
         self._per_player_lists: Dict = {}
@@ -112,6 +115,8 @@ class SharedFeatureGenerator:
             self.stat_handler.games_home = context.games_home
             self.stat_handler.games_away = context.games_away
             self.stat_handler.all_games = (context.games_home, context.games_away)
+            # Rebuild team index for fast bisect-based lookups
+            self.stat_handler._build_team_index()
             if context.venue_cache:
                 self.stat_handler._venue_cache.update(context.venue_cache)
             # Inject injury preloaded players cache
@@ -188,7 +193,8 @@ class SharedFeatureGenerator:
         player_filters: Dict,
         additional_features: Optional[Dict] = None,
         recency_decay_k: float = 15.0,
-        venue_guid: Optional[str] = None
+        venue_guid: Optional[str] = None,
+        game_id: Optional[str] = None
     ) -> Dict[str, float]:
         """
         Generate all requested features for a game.
@@ -204,6 +210,8 @@ class SharedFeatureGenerator:
             additional_features: Optional dict of pre-computed features (e.g., pred_margin)
             recency_decay_k: Decay constant for recency weighting
             venue_guid: Optional venue GUID for travel feature calculations
+            game_id: Optional game ID for training mode. When provided, uses cross-team
+                aggregation to include traded players' full season history in PER calcs.
 
         Returns:
             Dict mapping feature names to their computed values
@@ -295,7 +303,8 @@ class SharedFeatureGenerator:
             _start_per = _time.time()
             per_feature_values = self._calculate_per_features(
                 home_team, away_team, season, game_date,
-                player_filters, per_features
+                player_filters, per_features,
+                game_id=game_id
             )
             features_dict.update(per_feature_values)
             _elapsed_per = _time.time() - _start_per
@@ -330,9 +339,22 @@ class SharedFeatureGenerator:
         season: str,
         game_date: str,
         player_filters: Dict,
-        per_feature_names: List[str]
+        per_feature_names: List[str],
+        game_id: Optional[str] = None
     ) -> Dict[str, float]:
-        """Calculate PER (Player Efficiency Rating) features."""
+        """
+        Calculate PER (Player Efficiency Rating) features.
+
+        Args:
+            home_team: Home team name
+            away_team: Away team name
+            season: Season string
+            game_date: Date string (YYYY-MM-DD)
+            player_filters: Dict with player filter info per team
+            per_feature_names: List of PER feature names to calculate
+            game_id: Optional game ID for training mode. When provided, uses cross-team
+                aggregation to include traded players' full season history.
+        """
         result: Dict[str, float] = {}
 
         # Initialize all to 0.0 in case calculation fails
@@ -340,29 +362,13 @@ class SharedFeatureGenerator:
             result[fname] = 0.0
 
         try:
-            # Get injured players from roster
+            # Get injured players from player_filters (already sourced from rosters)
             injured_players_dict = None
-            try:
-                home_roster_doc = self._rosters_repo.find_roster(home_team, season)
-                away_roster_doc = self._rosters_repo.find_roster(away_team, season)
-
-                home_injured = []
-                away_injured = []
-
-                if home_roster_doc:
-                    home_injured = [str(entry.get('player_id', '')) for entry in home_roster_doc.get('roster', [])
-                                   if entry.get('injured', False)]
-                if away_roster_doc:
-                    away_injured = [str(entry.get('player_id', '')) for entry in away_roster_doc.get('roster', [])
-                                   if entry.get('injured', False)]
-
-                if home_injured or away_injured:
-                    injured_players_dict = {
-                        home_team: home_injured,
-                        away_team: away_injured
-                    }
-            except Exception:
-                pass
+            if player_filters:
+                injured_players_dict = {
+                    team: player_filters.get(team, {}).get('injured', [])
+                    for team in [home_team, away_team]
+                }
 
             # Calculate PER features using PERCalculator
             per_features = self.per_calculator.get_game_per_features(
@@ -371,7 +377,8 @@ class SharedFeatureGenerator:
                 season=season,
                 game_date=game_date,
                 player_filters=player_filters,
-                injured_players=injured_players_dict
+                injured_players=injured_players_dict,
+                game_id=game_id
             )
 
             if per_features:
@@ -384,8 +391,10 @@ class SharedFeatureGenerator:
                 if '_player_lists' in per_features:
                     self._per_player_lists.update(per_features['_player_lists'])
 
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            print(f"[SharedFeatureGenerator] Error calculating PER features: {e}")
+            traceback.print_exc()
 
         return result
 
@@ -441,8 +450,10 @@ class SharedFeatureGenerator:
                 if '_player_lists' in injury_features:
                     self._injury_player_lists.update(injury_features['_player_lists'])
 
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            print(f"[SharedFeatureGenerator] Error calculating injury features: {e}")
+            traceback.print_exc()
 
         return result
 

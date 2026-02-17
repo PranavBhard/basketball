@@ -3,7 +3,7 @@ Core infrastructure for unified model management across web app, CLI, and agent 
 """
 
 from .services.config_manager import ModelConfigManager
-from .models.factory import ModelFactory
+from .models.artifact_loader import ArtifactLoader
 from .features.manager import FeatureManager
 from .services.business_logic import ModelBusinessLogic
 from .services.artifacts import ArtifactManager
@@ -14,7 +14,7 @@ from .services.prediction import PredictionService, PredictionResult, MatchupInf
 
 __all__ = [
     'ModelConfigManager',
-    'ModelFactory',
+    'ArtifactLoader',
     'FeatureManager',
     'ModelBusinessLogic',
     'ArtifactManager',

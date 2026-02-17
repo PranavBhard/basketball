@@ -15,10 +15,10 @@ from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from dataclasses import dataclass
 from pytz import timezone
 
-from nba_app.core.league_config import load_league_config
+from bball_app.core.league_config import load_league_config
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 # Backward-compatible defaults (NBA).
@@ -217,6 +217,29 @@ class ESPNClient:
                     ))
 
         return games
+
+    # --- Teams Methods ---
+
+    def get_teams(self, page: int = 1, limit: int = 500) -> Optional[Dict]:
+        """
+        Fetch all teams from ESPN teams endpoint.
+
+        Args:
+            page: Page number for pagination
+            limit: Number of teams per page
+
+        Returns:
+            Raw JSON response or None if failed
+        """
+        url = self._url("teams_template") + f"?page={page}&limit={limit}"
+
+        try:
+            response = requests.get(url, headers=self.headers, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            print(f"Error fetching teams: {e}")
+            return None
 
     # --- Game Summary Methods ---
 

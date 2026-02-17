@@ -9,16 +9,16 @@ This module contains all statistics calculation functionality:
 """
 
 # Main statistics handler
-from nba_app.core.stats.handler import StatHandlerV2
+from bball_app.core.stats.handler import StatHandlerV2
 
 # PER Calculator
-from nba_app.core.stats.per_calculator import PERCalculator
+from bball_app.core.stats.per_calculator import PERCalculator
 
 # Elo cache
-from nba_app.core.stats.elo_cache import EloCache
+from bball_app.core.stats.elo_cache import EloCache
 
 # League stats caching
-from nba_app.core.stats.league_cache import (
+from bball_app.core.stats.league_cache import (
     cache_season,
     get_all_seasons,
     get_season_stats_with_fallback,

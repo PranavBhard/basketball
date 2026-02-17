@@ -18,8 +18,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import requests
 
-from nba_app.core.data import ESPNClient, GamesRepository
-from nba_app.core.league_config import LeagueConfig
+from bball_app.core.data import ESPNClient, GamesRepository
+from bball_app.core.league_config import LeagueConfig
 
 
 NBA_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"

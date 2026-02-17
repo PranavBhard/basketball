@@ -5,8 +5,8 @@ Helper functions for querying game data from in-memory collections.
 Used primarily for feature calculations that need to look up historical games.
 """
 
-from nba_app.core.utils.collection import import_collection
-from nba_app.core.mongo import Mongo
+from bball_app.core.utils.collection import import_collection
+from bball_app.core.mongo import Mongo
 from datetime import datetime, timedelta, date
 from dateutil import relativedelta
 

@@ -47,7 +47,7 @@ cd "$(dirname "$0")/.."
 source ./setup.sh
 
 # Set Python path
-export PYTHONPATH=/Users/pranav/Documents/NBA
+export PYTHONPATH=/Users/pranav/Documents/basketball
 
 # Run the injuries pipeline
-python -m nba_app.core.pipeline.injuries_pipeline "$LEAGUE" "$@"
+python -m bball_app.core.pipeline.injuries_pipeline "$LEAGUE" "$@"

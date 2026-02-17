@@ -229,6 +229,16 @@ class LeagueConfig:
         return v
 
     # -----------------------
+    # Extra features (league-specific)
+    # -----------------------
+    @property
+    def extra_feature_stats(self) -> List[str]:
+        """League-specific extra stat names from YAML config."""
+        ef = self.raw.get("extra_features") or {}
+        stats = ef.get("stats", [])
+        return stats if isinstance(stats, list) else []
+
+    # -----------------------
     # ESPN endpoint templates
     # -----------------------
     @property

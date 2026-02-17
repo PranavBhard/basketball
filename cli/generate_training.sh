@@ -34,9 +34,12 @@
 #   --features LIST     Comma-separated list of feature names or patterns to generate
 #                       Supports wildcards: "vegas_*" matches all vegas features
 #                       (default: all features)
+#   --exclude-features  Comma-separated list of feature names or patterns to EXCLUDE
+#                       Supports wildcards: "player_*,inj_*" excludes all player/injury features
 #   --add               Add/update to existing CSV:
-#                       - With --features: updates specified columns only
+#                       - With --features/--exclude-features: updates specified columns only
 #                       - With --season/--seasons: replaces rows for those seasons
+#                       - Combine all three to update specific columns for specific seasons
 #
 # Prediction Columns:
 #   If a points model is selected in model_config_points_nba, prediction columns
@@ -78,7 +81,7 @@ cd "$(dirname "$0")/.."
 source ./setup.sh
 
 # Set Python path
-export PYTHONPATH=/Users/pranav/Documents/NBA
+export PYTHONPATH=/Users/pranav/Documents/basketball
 
 # Run the training pipeline
-python -m nba_app.core.pipeline.training_pipeline "$LEAGUE" "$@"
+python -m bball_app.core.pipeline.training_pipeline "$LEAGUE" "$@"

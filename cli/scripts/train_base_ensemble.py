@@ -9,10 +9,10 @@ are derived from the base models to ensure platform-wide consistency. All base
 models must have identical temporal configurations.
 
 Usage:
-    python -m nba_app.cli.scripts.train_base_ensemble <league> [options]
+    python -m bball_app.cli.scripts.train_base_ensemble <league> [options]
 
 Examples:
-    python -m nba_app.cli.scripts.train_base_ensemble nba --model LR --c-value 0.1 \
+    python -m bball_app.cli.scripts.train_base_ensemble nba --model LR --c-value 0.1 \
         --models "model1_name,model2_name" --extra-features "pred_margin"
 """
 
@@ -79,8 +79,8 @@ Temporal Configuration:
     args = parser.parse_args()
 
     # Import here to avoid slow imports on --help
-    from nba_app.core.league_config import load_league_config
-    from nba_app.core.services.training_service import TrainingService
+    from bball_app.core.league_config import load_league_config
+    from bball_app.core.services.training_service import TrainingService
 
     # Load league config
     league = load_league_config(args.league)

@@ -8,16 +8,15 @@ Consumer layers should ONLY use this service for predictions - do NOT implement
 prediction logic elsewhere.
 
 Usage:
-    from nba_app.core.services.prediction import PredictionService
+    from bball_app.core.services.prediction import PredictionService
 
     service = PredictionService()
 
-    # Single game prediction
+    # Single game prediction (rosters are the source of truth for player lists)
     result = service.predict_game(
         home_team='LAL',
         away_team='BOS',
-        game_date='2024-03-15',
-        player_config={'home_injuries': ['12345'], 'away_injuries': []}
+        game_date='2024-03-15'
     )
 
     # All games on a date
@@ -31,19 +30,19 @@ from datetime import datetime, date
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.models.bball_model import BballModel
-from nba_app.core.models.points_regression import PointsRegressionTrainer
-from nba_app.core.utils.players import build_player_lists_for_prediction
-from nba_app.core.services.config_manager import ModelConfigManager
-from nba_app.core.models.factory import ModelFactory
-from nba_app.core.data import GamesRepository, ClassifierConfigRepository, PointsConfigRepository
-from nba_app.core.market.kalshi import get_team_abbrev_map
+from bball_app.core.mongo import Mongo
+from bball_app.core.models.bball_model import BballModel
+from bball_app.core.models.points_regression import PointsRegressionTrainer
+from bball_app.core.utils.players import build_player_lists_for_prediction
+from bball_app.core.services.config_manager import ModelConfigManager
+from bball_app.core.models.artifact_loader import ArtifactLoader
+from bball_app.core.data import GamesRepository, ClassifierConfigRepository, PointsConfigRepository
+from bball_app.core.market.kalshi import get_team_abbrev_map
 from collections import defaultdict
 import time
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 class PredictionContext:
@@ -68,6 +67,7 @@ class PredictionContext:
         season: str,
         include_previous_season: bool = True,
         league: Optional["LeagueConfig"] = None,
+        teams: Optional[List[str]] = None,
     ):
         """
         Initialize prediction context with scoped data preloading.
@@ -77,16 +77,21 @@ class PredictionContext:
             season: Primary season to preload (e.g., '2024-2025')
             include_previous_season: If True, also load previous season for
                 rolling averages that span season boundaries
+            teams: Optional list of team abbreviations to scope loading.
+                When provided, only games and player stats for these teams
+                are loaded (much faster for single-game predictions).
         """
         self.db = db
         self.season = season
         self.include_previous_season = include_previous_season
         self.league = league
+        self.teams = teams
 
         # Preloaded caches (same structure as StatHandlerV2/PERCalculator expect)
         self.games_home = {}   # {season: {date: {team: game_doc}}}
         self.games_away = {}   # {season: {date: {team: game_doc}}}
         self.player_stats = defaultdict(list)  # {(team, season): [player_game_records]}
+        self.player_stats_by_player = defaultdict(list)  # {(player_id, season): [player_game_records]} - for cross-team aggregation
         self.venue_cache = {}  # {venue_guid: (lat, lon)}
 
         # Stats
@@ -136,6 +141,12 @@ class PredictionContext:
         """Load games for the target seasons into nested dict structure."""
         query = {'season': {'$in': seasons}}
 
+        if self.teams:
+            query['$or'] = [
+                {'homeTeam.name': {'$in': self.teams}},
+                {'awayTeam.name': {'$in': self.teams}},
+            ]
+
         # Only fetch fields needed for feature calculations
         projection = {
             'homeTeam': 1, 'awayTeam': 1, 'season': 1, 'date': 1,
@@ -183,6 +194,9 @@ class PredictionContext:
             'stats.min': {'$gt': 0}  # Only players who played
         }
 
+        if self.teams:
+            query['team'] = {'$in': self.teams}
+
         # Fetch fields needed for PER and injury calculations
         projection = {
             'player_id': 1, 'player_name': 1, 'game_id': 1,
@@ -199,9 +213,16 @@ class PredictionContext:
             key = (rec.get('team'), rec.get('season'))
             self.player_stats[key].append(rec)
 
+            # Also index by (player_id, season) for cross-team aggregation
+            # This enables traded player stats to be aggregated across all teams
+            player_key = (str(rec.get('player_id')), rec.get('season'))
+            self.player_stats_by_player[player_key].append(rec)
+
         # Sort each list by date for chronological access
         for key in self.player_stats:
             self.player_stats[key].sort(key=lambda x: str(x.get('date', '')))
+        for key in self.player_stats_by_player:
+            self.player_stats_by_player[key].sort(key=lambda x: str(x.get('date', '')))
 
     def _preload_venues(self):
         """Load venue locations for travel distance features."""
@@ -226,13 +247,16 @@ class PredictionContext:
 
     def get_stats(self) -> Dict:
         """Return preload statistics."""
-        return {
+        stats = {
             'season': self.season,
             'games_loaded': self._games_loaded,
             'player_records_loaded': self._player_records_loaded,
             'venues_loaded': len(self.venue_cache),
             'load_time_ms': self._load_time_ms
         }
+        if self.teams:
+            stats['teams'] = self.teams
+        return stats
 
 
 @dataclass
@@ -323,28 +347,31 @@ class PredictionService:
             return team_name
         return self._team_abbrev_map.get(team_name.upper(), team_name)
 
-    def _get_or_create_context(self, season: str) -> PredictionContext:
+    def _get_or_create_context(self, season: str, teams: Optional[List[str]] = None) -> PredictionContext:
         """
         Get cached prediction context or create a new one.
 
-        Contexts are cached by season to avoid repeated loading.
-        A single context can be shared across multiple predictions
-        for the same season.
+        Contexts are cached by season (and optionally teams) to avoid repeated loading.
+        A single context can be shared across multiple predictions for the same scope.
 
         Args:
             season: Season string (e.g., '2024-2025')
+            teams: Optional list of team abbreviations to scope loading.
+                When provided, only data for these teams is loaded.
 
         Returns:
             PredictionContext with preloaded data for the season
         """
-        if season not in self._context_cache:
-            self._context_cache[season] = PredictionContext(
+        cache_key = f"{season}|{'_'.join(sorted(teams))}" if teams else season
+        if cache_key not in self._context_cache:
+            self._context_cache[cache_key] = PredictionContext(
                 db=self.db,
                 season=season,
                 include_previous_season=True,
                 league=self.league,
+                teams=teams,
             )
-        return self._context_cache[season]
+        return self._context_cache[cache_key]
 
     def clear_context_cache(self):
         """Clear the prediction context cache. Call this to free memory."""
@@ -360,7 +387,6 @@ class PredictionService:
         away_team: str,
         game_date: str,
         game_id: Optional[str] = None,
-        player_config: Optional[Dict] = None,
         include_points: bool = True,
         classifier_config: Optional[Dict] = None,
         points_config: Optional[Dict] = None,
@@ -369,17 +395,14 @@ class PredictionService:
         Generate prediction for a single game.
 
         This is the primary prediction method - all interfaces should use this.
+        Player lists (playing, starters, injured) come from rosters as the
+        single source of truth.
 
         Args:
             home_team: Home team abbreviation (e.g., 'LAL')
             away_team: Away team abbreviation (e.g., 'BOS')
             game_date: Game date in 'YYYY-MM-DD' format
             game_id: Optional game ID for looking up game document
-            player_config: Optional player configuration dict with keys:
-                - home_injuries: List of injured player IDs for home team
-                - away_injuries: List of injured player IDs for away team
-                - home_starters: List of starter player IDs for home team
-                - away_starters: List of starter player IDs for away team
             include_points: Whether to include points model prediction
             classifier_config: Optional classifier config (uses selected if None)
             points_config: Optional points config (uses selected if None)
@@ -426,8 +449,13 @@ class PredictionService:
         if not is_valid:
             return self._error_result(home_team, away_team, game_date, game_id, error_msg)
 
-        # Get or create prediction context for this season (preloads data once)
-        context = self._get_or_create_context(season)
+        # Get or create prediction context for this season (preloads data once).
+        # If a full-season context already exists (e.g., from predict_date batch),
+        # reuse it. Otherwise, create a team-scoped context for faster single-game loads.
+        if season in self._context_cache:
+            context = self._context_cache[season]
+        else:
+            context = self._get_or_create_context(season, teams=[home_team, away_team])
 
         # Load classifier model with preloaded context
         model = self._load_classifier_model(classifier_config, context)
@@ -435,19 +463,13 @@ class PredictionService:
             return self._error_result(home_team, away_team, game_date, game_id,
                                       'Failed to load classifier model.')
 
-        # Build player filters from config
-        player_config = player_config or {}
+        # Build player filters from rosters (single source of truth)
         player_filters = build_player_lists_for_prediction(
             home_team=home_team,
             away_team=away_team,
             season=season,
-            game_id=game_id,
-            game_doc=game_doc,
-            home_injuries=player_config.get('home_injuries', []),
-            away_injuries=player_config.get('away_injuries', []),
-            home_starters=player_config.get('home_starters', []),
-            away_starters=player_config.get('away_starters', []),
-            db=self.db
+            db=self.db,
+            league=self.league
         )
 
         # Get points prediction if enabled
@@ -493,29 +515,30 @@ class PredictionService:
     def predict_date(
         self,
         game_date: str,
-        player_configs: Optional[Dict[str, Dict]] = None,
         include_points: bool = True,
         classifier_config: Optional[Dict] = None,
         points_config: Optional[Dict] = None,
         job_id: Optional[str] = None,
+        on_prediction: Optional[callable] = None,
     ) -> List[PredictionResult]:
         """
         Generate predictions for all games on a date.
 
         Args:
             game_date: Date in 'YYYY-MM-DD' format
-            player_configs: Optional dict mapping game_id -> player_config
             include_points: Whether to include points model predictions
             classifier_config: Optional classifier config (uses selected if None)
             points_config: Optional points config (uses selected if None)
             job_id: Optional job ID for progress tracking (used by async bulk predictions)
+            on_prediction: Optional callback called after each prediction with (result, matchup).
+                          Use this to save predictions incrementally for real-time UI updates.
 
         Returns:
             List of PredictionResult objects, one per game
         """
         # Import job progress updater if job_id provided
         if job_id:
-            from nba_app.core.services.jobs import update_job_progress
+            from bball_app.core.services.jobs import update_job_progress
 
         # Parse date
         try:
@@ -568,22 +591,26 @@ class PredictionService:
 
         # Generate prediction for each matchup
         results = []
-        player_configs = player_configs or {}
         total_games = len(matchups)
 
         for i, matchup in enumerate(matchups):
-            player_config = player_configs.get(matchup.game_id, {})
             result = self.predict_game(
                 home_team=matchup.home_team,
                 away_team=matchup.away_team,
                 game_date=game_date,
                 game_id=matchup.game_id,
-                player_config=player_config,
                 include_points=include_points,
                 classifier_config=classifier_config,
                 points_config=points_config,
             )
             results.append(result)
+
+            # Call callback to save prediction immediately (for real-time UI updates)
+            if on_prediction:
+                try:
+                    on_prediction(result, matchup)
+                except Exception as e:
+                    print(f"Error in on_prediction callback for {matchup.game_id}: {e}")
 
             # Update progress after each game (scale from 20% to 90%)
             if job_id:
@@ -663,12 +690,13 @@ class PredictionService:
                 include_era_normalization=False,
                 include_per_features=True,
                 include_injuries=False,
-                preload_data=False
+                preload_data=False,
+                league=self.league
             )
             model.db = self.db
 
-            # Load model using ModelFactory (prioritizes artifacts, uses cache)
-            classifier, scaler, feature_names = ModelFactory.create_model(config, use_artifacts=True)
+            # Load model using ArtifactLoader (prioritizes artifacts, uses cache)
+            classifier, scaler, feature_names = ArtifactLoader.create_model(config, use_artifacts=True)
 
             model.classifier_model = classifier
             model.scaler = scaler
@@ -729,7 +757,8 @@ class PredictionService:
                 include_era_normalization=False,
                 include_per_features=True,
                 include_injuries=False,
-                preload_data=False
+                preload_data=False,
+                league=self.league
             )
             model.db = self.db
 
@@ -850,7 +879,7 @@ class PredictionService:
         """
         try:
             # Use ESPNClient for API access
-            from nba_app.core.data import ESPNClient
+            from bball_app.core.data import ESPNClient
 
             espn_client = ESPNClient(league=self.league)
             scoreboard = espn_client.get_scoreboard_site(game_date)
@@ -1030,7 +1059,7 @@ class PredictionService:
         away_injured: List[str] = []
         try:
             # Prefer to derive from roster flags (prediction-time truth).
-            from nba_app.core.data import RostersRepository, PlayersRepository
+            from bball_app.core.data import RostersRepository, PlayersRepository
 
             rosters_repo = RostersRepository(self.db)
             players_repo = PlayersRepository(self.db)

@@ -115,6 +115,13 @@
                             Rows are included only if both teams have at least this many prior same-season games. Used in filtering and CSV filename (e.g., _minGP-15).
                         </small>
                     </div>
+                    <div style="margin-top: 15px;">
+                        <label for="exclude-seasons" style="display: block; margin-bottom: 5px;">Exclude Seasons (comma-separated start years):</label>
+                        <input type="text" id="exclude-seasons" name="exclude_seasons" placeholder="e.g. 2019,2020" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                        <small style="display: block; margin-top: 5px; color: #666;">
+                            Season start years to exclude from training data. E.g. "2019" excludes the 2019-2020 season. Useful for seasons with bad data quality.
+                        </small>
+                    </div>
                 </div>
                 
                 <!-- Time-Based Calibration -->
@@ -202,6 +209,11 @@
 
             <!-- Filter and Sort Controls -->
             <div class="filter-sort-controls">
+                <div class="filter-group">
+                    <label for="filter-name">Name:</label>
+                    <input type="text" id="filter-name" placeholder="Filter by name..." class="filter-text-input">
+                </div>
+
                 <div class="filter-group">
                     <label for="filter-model-type">Model Type:</label>
                     <select id="filter-model-type" onchange="applyFiltersAndSort()">
@@ -865,6 +877,26 @@
     box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
 }
 
+.filter-text-input {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    font-size: 0.9em;
+    color: #333;
+    width: 150px;
+}
+
+.filter-text-input:hover {
+    border-color: #667eea;
+}
+
+.filter-text-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
 
 .results-content {
     flex: 1;
@@ -1431,6 +1463,13 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('clear-results-btn').addEventListener('click', clearResults);
     document.getElementById('create-ensemble-btn').addEventListener('click', createEnsemble);
 
+    // Name filter with debounce (300ms delay so typing feels responsive)
+    let nameFilterTimeout = null;
+    document.getElementById('filter-name').addEventListener('input', function() {
+        clearTimeout(nameFilterTimeout);
+        nameFilterTimeout = setTimeout(applyFiltersAndSort, 300);
+    });
+
     // Ensemble meta feature listeners
     document.getElementById('ensemble-use-disagree').addEventListener('change', updateEnsembleMetaSummary);
     document.getElementById('ensemble-use-conf').addEventListener('change', updateEnsembleMetaSummary);
@@ -1719,7 +1758,9 @@ function renderEmbeddedBaseModelPanels(ensembleConfig) {
                 <div><span class="k">Trained:</span> ${escapeHtml(trainedAt)}</div>
                 ${base.best_c_value !== null && base.best_c_value !== undefined ? `<div><span class="k">Best C:</span> ${escapeHtml(base.best_c_value)}</div>` : ''}
                 ${base.min_games_played !== null && base.min_games_played !== undefined ? `<div><span class="k">Min Games Played:</span> ${escapeHtml(base.min_games_played)}</div>` : ''}
+                ${base.exclude_seasons && Array.isArray(base.exclude_seasons) && base.exclude_seasons.length > 0 ? `<div><span class="k">Excluded Seasons:</span> ${escapeHtml(base.exclude_seasons.join(', '))}</div>` : ''}
                 ${typeof base.use_master !== 'undefined' ? `<div><span class="k">Use Master CSV:</span> ${base.use_master ? 'Yes' : 'No'}</div>` : ''}
+                ${base.training_stats && (base.training_stats.train_games || base.training_stats.calibration_games || base.training_stats.eval_games) ? `<div><span class="k">Games:</span> Train: ${base.training_stats.train_games ?? 'N/A'} | Cal: ${base.training_stats.calibration_games ?? 'N/A'} | Eval: ${base.training_stats.eval_games ?? 'N/A'}</div>` : ''}
             </div>
         `;
 
@@ -1804,7 +1845,8 @@ function getFormData() {
             begin_year: selectedConfig.begin_year || null,
             calibration_years: selectedConfig.calibration_years || null,
             evaluation_year: selectedConfig.evaluation_year || null,
-            min_games_played: selectedConfig.min_games_played || 15
+            min_games_played: selectedConfig.min_games_played || 15,
+            exclude_seasons: selectedConfig.exclude_seasons || null
         };
     }
 
@@ -1823,6 +1865,9 @@ function getFormData() {
     const recencyDecayK = parseFloat(document.getElementById('recency-decay-k')?.value || '15.0');
     // Min games played
     const minGamesPlayed = parseInt(document.getElementById('min-games-played')?.value || '15');
+    // Exclude seasons
+    const excludeSeasonsStr = document.getElementById('exclude-seasons')?.value || '';
+    const excludeSeasonsArray = excludeSeasonsStr ? excludeSeasonsStr.split(',').map(s => parseInt(s.trim())).filter(s => !isNaN(s)) : null;
 
     return {
         config_id: selectedConfigId,  // Include selected config ID to update existing config
@@ -1836,7 +1881,8 @@ function getFormData() {
         begin_year: useTimeCalibration ? beginYear : null,
         calibration_years: useTimeCalibration ? calibrationYears : null,
         evaluation_year: useTimeCalibration ? evaluationYear : null,
-        min_games_played: isNaN(minGamesPlayed) ? 15 : minGamesPlayed
+        min_games_played: isNaN(minGamesPlayed) ? 15 : minGamesPlayed,
+        exclude_seasons: excludeSeasonsArray
     };
 }
 
@@ -2021,7 +2067,15 @@ function setFormData(config) {
             ? parseInt(config.min_games_played)
             : 15;
     }
-    
+
+    // Set exclude_seasons
+    const esInput = document.getElementById('exclude-seasons');
+    if (esInput) {
+        esInput.value = (config && config.exclude_seasons && Array.isArray(config.exclude_seasons))
+            ? config.exclude_seasons.join(', ')
+            : '';
+    }
+
     // Update feature count
     updateFeatureCount();
 }
@@ -2494,13 +2548,20 @@ function getTimeConfigKey(config) {
         ? config.calibration_years.join(',')
         : (config.calibration_years || config.calibration_year || 'N/A');
     const evalYear = config.evaluation_year || 'N/A';
-    return `${method}|${beginYear}|${calYears}|${evalYear}`;
+    const exclSeasons = config.exclude_seasons && Array.isArray(config.exclude_seasons) && config.exclude_seasons.length > 0
+        ? config.exclude_seasons.join(',')
+        : '';
+    return `${method}|${beginYear}|${calYears}|${evalYear}|${exclSeasons}`;
 }
 
 // Format a time config key for display
 function formatTimeConfigLabel(key) {
-    const [method, beginYear, calYears, evalYear] = key.split('|');
-    return `${method} | Train:${beginYear} | Cal:${calYears} | Eval:${evalYear}`;
+    const parts = key.split('|');
+    const [method, beginYear, calYears, evalYear] = parts;
+    const exclSeasons = parts[4] || '';
+    let label = `${method} | Train:${beginYear} | Cal:${calYears} | Eval:${evalYear}`;
+    if (exclSeasons) label += ` | Excl:${exclSeasons}`;
+    return label;
 }
 
 // Populate the time config filter dropdown with unique combinations
@@ -2534,6 +2595,7 @@ function applyFiltersAndSort() {
     historyPage = 1;
 
     // Get filter values
+    const filterName = (document.getElementById('filter-name')?.value || '').trim().toLowerCase();
     const filterModelType = document.getElementById('filter-model-type')?.value || '';
     const filterCalibration = document.getElementById('filter-calibration')?.value || '';
     const filterCalibrationMethod = document.getElementById('filter-calibration-method')?.value || '';
@@ -2549,6 +2611,11 @@ function applyFiltersAndSort() {
 
     // Apply filters
     let filteredConfigs = configsToFilter.filter(config => {
+        // Name filter (case-insensitive substring match)
+        if (filterName && !(config.name || '').toLowerCase().includes(filterName)) {
+            return false;
+        }
+
         // Ensemble filter - hide ensembles unless toggle is checked
         if (!showEnsembles && config.ensemble === true) {
             return false;
@@ -2651,6 +2718,7 @@ function applyFiltersAndSort() {
 }
 
 function resetFiltersAndSort() {
+    document.getElementById('filter-name').value = '';
     document.getElementById('filter-model-type').value = '';
     document.getElementById('filter-calibration').value = '';
     document.getElementById('filter-calibration-method').value = '';
@@ -2768,6 +2836,7 @@ function createHistoryItem(config) {
             ${config.features && Array.isArray(config.features) && config.features.includes('pred_margin') ? `<span><strong>Point Features:</strong> Yes (pred_margin)</span>` : ''}
             ${config.ensemble ? `<span><strong>Meta Features:</strong> ${formatEnsembleMetaFeatures(config)}</span>` : ''}
             <span><strong>Min Games:</strong> ${config.min_games_played !== null && config.min_games_played !== undefined ? config.min_games_played : 'N/A'}</span>
+            ${config.exclude_seasons && Array.isArray(config.exclude_seasons) && config.exclude_seasons.length > 0 ? `<span><strong>Excluded:</strong> ${config.exclude_seasons.join(', ')}</span>` : ''}
             <span><strong>Trained:</strong> ${trainedDate}</span>
         </div>
         <div class="history-item-metrics">
@@ -2788,8 +2857,9 @@ function createHistoryItem(config) {
             <div style="margin-top: 10px;">
                 <strong>Training Stats:</strong>
                 <ul style="margin: 5px 0; padding-left: 20px; font-size: 0.9em; color: #666;">
-                    <li>Games: ${config.training_stats && config.training_stats.total_games ? config.training_stats.total_games : 'N/A'}</li>
+                    <li>Games: ${config.training_stats && config.training_stats.total_games ? config.training_stats.total_games : 'N/A'}${config.training_stats && (config.training_stats.train_games || config.training_stats.calibration_games || config.training_stats.eval_games) ? ` (Train: ${config.training_stats.train_games ?? 'N/A'} | Cal: ${config.training_stats.calibration_games ?? 'N/A'} | Eval: ${config.training_stats.eval_games ?? 'N/A'})` : ''}</li>
                     <li>Min Prior Games Per Team: ${config.min_games_played !== null && config.min_games_played !== undefined ? config.min_games_played : 'N/A'}</li>
+                    ${config.exclude_seasons && Array.isArray(config.exclude_seasons) && config.exclude_seasons.length > 0 ? `<li>Excluded Seasons: ${config.exclude_seasons.join(', ')}</li>` : ''}
                     <li>Enhanced Features: ${config.training_stats && config.training_stats.include_enhanced_features ? 'Yes' : 'No'}</li>
                     <li>Era Normalization: ${config.training_stats && config.training_stats.include_era_normalization ? 'Yes' : 'No'}</li>
                     <li>PER Features: ${config.training_stats && config.training_stats.no_per ? 'Excluded' : 'Included'}</li>
@@ -2909,20 +2979,44 @@ async function loadConfigIntoForm(configId) {
             }
             features = Array.from(allFeatures);
             console.log(`Ensemble: collected ${features.length} features from ${config.ensemble_models.length} base models`);
+
+            // Fill missing time-config fields from first base model
+            const firstBase = allHistoryConfigs.find(c => c._id === config.ensemble_models[0]);
+            if (firstBase) {
+                if (!config.calibration_method) config.calibration_method = firstBase.calibration_method;
+                if (!config.exclude_seasons) config.exclude_seasons = firstBase.exclude_seasons;
+                if (config.min_games_played == null) config.min_games_played = firstBase.min_games_played;
+                if (!config.use_time_calibration && firstBase.use_time_calibration) {
+                    config.use_time_calibration = firstBase.use_time_calibration;
+                    config.begin_year = config.begin_year || firstBase.begin_year;
+                    config.calibration_years = config.calibration_years || firstBase.calibration_years;
+                    config.evaluation_year = config.evaluation_year || firstBase.evaluation_year;
+                }
+            }
         }
+
+        // For ensembles, resolve model_type to meta-model type and c_value
+        const effectiveModelType = (config.ensemble && config.model_type === 'Ensemble')
+            ? (config.meta_model_type || 'LogisticRegression')
+            : config.model_type;
+        const effectiveCValue = (config.ensemble)
+            ? (config.best_c_value ?? config.meta_c_value ?? null)
+            : (config.best_c_value ?? null);
 
         // Build config object for form
         const formConfig = {
             use_master: (typeof config.use_master !== 'undefined' && config.use_master !== null) ? Boolean(config.use_master) : true,
             min_games_played: (typeof config.min_games_played !== 'undefined' && config.min_games_played !== null) ? parseInt(config.min_games_played) : 15,
-            model_types: [config.model_type],
+            model_types: [effectiveModelType],
             features: features,
-            c_values: config.best_c_value !== null && config.best_c_value !== undefined ? [config.best_c_value] : [],
+            c_values: effectiveCValue !== null && effectiveCValue !== undefined ? [effectiveCValue] : [],
             use_time_calibration: config.use_time_calibration || false,
             calibration_method: config.calibration_method || null,
             begin_year: config.begin_year || null,
             calibration_years: config.calibration_years || (config.calibration_year ? [config.calibration_year] : null),
             evaluation_year: config.evaluation_year || null,
+            exclude_seasons: config.exclude_seasons || null,
+            ensemble: config.ensemble || false,
             // Note: point_model_id is deprecated - pred_margin should be selected as a regular feature from master CSV
         };
 
@@ -3109,7 +3203,7 @@ function copyClassifierConfigToClipboard(configId, button, event) {
 
     text += `--- Training Stats ---\n`;
     const ts = config.training_stats || {};
-    text += `Games: ${ts.total_games || 'N/A'}\n`;
+    text += `Games: ${ts.total_games || 'N/A'}${ts.train_games || ts.calibration_games || ts.eval_games ? ` (Train: ${ts.train_games ?? 'N/A'} | Cal: ${ts.calibration_games ?? 'N/A'} | Eval: ${ts.eval_games ?? 'N/A'})` : ''}\n`;
     text += `Enhanced Features: ${ts.include_enhanced_features ? 'Yes' : 'No'}\n`;
     text += `Era Normalization: ${ts.include_era_normalization ? 'Yes' : 'No'}\n`;
     text += `PER Features: ${ts.no_per ? 'Excluded' : 'Included'}\n`;
@@ -3122,7 +3216,11 @@ function copyClassifierConfigToClipboard(configId, button, event) {
         text += `Method: ${config.calibration_method || 'N/A'}\n`;
         text += `Begin Year: ${config.begin_year || 'N/A'}\n`;
         text += `Calibration Years: ${Array.isArray(config.calibration_years) ? config.calibration_years.join(', ') : (config.calibration_years || config.calibration_year || 'N/A')}\n`;
-        text += `Evaluation Year: ${config.evaluation_year || 'N/A'}\n\n`;
+        text += `Evaluation Year: ${config.evaluation_year || 'N/A'}\n`;
+        if (config.exclude_seasons && Array.isArray(config.exclude_seasons) && config.exclude_seasons.length > 0) {
+            text += `Excluded Seasons: ${config.exclude_seasons.join(', ')}\n`;
+        }
+        text += `\n`;
     }
 
     // Ensemble base models

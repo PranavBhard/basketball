@@ -12,11 +12,11 @@ import pandas as pd
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple, Union, TYPE_CHECKING
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.league_config import load_league_config
+from bball_app.core.mongo import Mongo
+from bball_app.core.league_config import load_league_config
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 # Get project root (assuming this file is in nba_app/core/services/)
@@ -116,21 +116,21 @@ class TrainingDataService:
         Returns:
             List of feature names
         """
-        from nba_app.core.features.registry import FeatureGroups
+        from bball_app.core.features.registry import FeatureGroups
 
         if no_player:
             # Get all groups except player-related ones
-            all_groups = FeatureGroups.get_all_group_definitions()
+            all_groups = FeatureGroups.get_all_group_definitions(league=self.league)
             player_groups = {FeatureGroups.PLAYER_TALENT, FeatureGroups.INJURIES}
             all_features = []
             for group_name in all_groups.keys():
                 if group_name not in player_groups:
                     all_features.extend(
-                        FeatureGroups.get_features_for_group(group_name, include_side=True)
+                        FeatureGroups.get_features_for_group(group_name, include_side=True, league=self.league)
                     )
             return sorted(set(all_features))
         else:
-            return FeatureGroups.get_all_features_flat(include_side=True)
+            return FeatureGroups.get_all_features_flat(include_side=True, league=self.league)
 
     # =========================================================================
     # Metadata Operations
@@ -243,7 +243,7 @@ class TrainingDataService:
         Returns:
             Tuple of (games_added_count, updated_master_path)
         """
-        from nba_app.core.models.bball_model import BballModel
+        from bball_app.core.models.bball_model import BballModel
 
         if not seasons:
             raise ValueError("No seasons provided")
@@ -399,7 +399,7 @@ class TrainingDataService:
         Returns:
             Tuple of (game_count, csv_path, feature_list)
         """
-        from nba_app.core.models.bball_model import BballModel
+        from bball_app.core.models.bball_model import BballModel
 
         def update_progress(current, total, pct, message=""):
             if progress_callback:
@@ -493,7 +493,7 @@ class TrainingDataService:
         Returns:
             Tuple of (games_added_count, updated_master_path)
         """
-        from nba_app.core.models.bball_model import BballModel
+        from bball_app.core.models.bball_model import BballModel
 
         # Get master metadata
         master_meta = self.get_metadata()
@@ -926,10 +926,11 @@ def extract_features_from_master_for_points(
 
 def check_master_needs_regeneration(
     db,
-    requested_features: List[str]
+    requested_features: List[str],
+    league: Union[str, "LeagueConfig", None] = None
 ) -> Tuple[bool, List[str]]:
     """Check if master training data needs regeneration."""
-    service = TrainingDataService(db=db)
+    service = TrainingDataService(db=db, league=league)
     return service.check_needs_regeneration(requested_features)
 
 

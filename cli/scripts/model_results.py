@@ -5,12 +5,12 @@ Model Results CLI Script
 Thin wrapper around TrainingService.get_model_results().
 
 Usage:
-    python -m nba_app.cli.scripts.model_results <league> --model <name_or_id>
+    python -m bball_app.cli.scripts.model_results <league> --model <name_or_id>
 
 Examples:
-    python -m nba_app.cli.scripts.model_results nba --model "test_lr_model"
-    python -m nba_app.cli.scripts.model_results nba --model "67a1b2c3d4e5f6g7h8i9j0k1"
-    python -m nba_app.cli.scripts.model_results nba --list
+    python -m bball_app.cli.scripts.model_results nba --model "test_lr_model"
+    python -m bball_app.cli.scripts.model_results nba --model "67a1b2c3d4e5f6g7h8i9j0k1"
+    python -m bball_app.cli.scripts.model_results nba --list
 """
 
 import argparse
@@ -58,8 +58,8 @@ Examples:
         sys.exit(1)
 
     # Import here to avoid slow imports on --help
-    from nba_app.core.league_config import load_league_config
-    from nba_app.core.services.training_service import TrainingService
+    from bball_app.core.league_config import load_league_config
+    from bball_app.core.services.training_service import TrainingService
 
     # Load league config
     league = load_league_config(args.league)

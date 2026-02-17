@@ -11,10 +11,10 @@ Steps:
 6. CSV registration
 
 Usage:
-    python -m nba_app.core.pipeline.full_pipeline nba
-    python -m nba_app.core.pipeline.full_pipeline cbb --max-workers 8
-    python -m nba_app.core.pipeline.full_pipeline nba --seasons 2023-2024,2024-2025
-    python -m nba_app.core.pipeline.full_pipeline nba --skip-injuries
+    python -m bball_app.core.pipeline.full_pipeline nba
+    python -m bball_app.core.pipeline.full_pipeline cbb --max-workers 8
+    python -m bball_app.core.pipeline.full_pipeline nba --seasons 2023-2024,2024-2025
+    python -m bball_app.core.pipeline.full_pipeline nba --skip-injuries
 """
 
 import argparse
@@ -37,8 +37,8 @@ project_root = os.path.dirname(nba_app_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nba_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
-from nba_app.core.pipeline.config import PipelineConfig
+from bball_app.core.league_config import load_league_config, get_available_leagues, LeagueConfig
+from bball_app.core.pipeline.config import PipelineConfig
 
 
 class Status(Enum):
@@ -127,9 +127,9 @@ def run_espn_pull(
 ) -> bool:
     """Pull ESPN data for a single season."""
     from datetime import datetime as _dt
-    from nba_app.core.services.espn_sync import fetch_and_save_games
-    from nba_app.core.league_config import load_league_config as _load_lc
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.services.espn_sync import fetch_and_save_games
+    from bball_app.core.league_config import load_league_config as _load_lc
+    from bball_app.core.mongo import Mongo
 
     state.update_season(season, status=Status.RUNNING, phase="pulling games",
                        start_time=time.time())
@@ -143,11 +143,23 @@ def run_espn_pull(
 
         state.update_season(season, phase="fetching games")
 
+        # Use quiet mode with a progress callback that updates state incrementally
+        def on_progress(pct, msg):
+            # Parse game count from the callback message
+            # Format: "Pulled N games (D/T days)"
+            import re as _re
+            m = _re.search(r'Pulled (\d+) games', msg)
+            if m:
+                state.update_season(season, games_found=int(m.group(1)),
+                                   phase=f"{pct}% ({m.group(1)} games)")
+
         stats = fetch_and_save_games(
             mongo.db, league_config,
             sd, ed,
             dry_run=dry_run,
-            verbose=verbose
+            verbose=verbose,
+            quiet=(not verbose),
+            progress_callback=on_progress
         )
 
         games_count = stats.get('games_processed', 0)
@@ -172,9 +184,9 @@ def run_espn_pull(
 
 
 def run_post_processing(config: PipelineConfig, dry_run: bool = False):
-    """Run post-processing steps (venues, players)."""
-    from nba_app.core.services.espn_sync import refresh_venues, refresh_players
-    from nba_app.core.mongo import Mongo
+    """Run post-processing steps (venues, teams, players)."""
+    from bball_app.core.services.espn_sync import refresh_venues, refresh_players, refresh_teams
+    from bball_app.core.mongo import Mongo
 
     mongo = Mongo()
 
@@ -186,6 +198,39 @@ def run_post_processing(config: PipelineConfig, dry_run: bool = False):
         except Exception as e:
             print(f"    Warning: Refreshing venues failed: {str(e)[:200]}")
 
+        print("  Geocoding venues missing coordinates...")
+        try:
+            from bball_app.core.services.espn_sync import geocode_missing_venues
+            result = geocode_missing_venues(mongo.db, config.league, dry_run=dry_run)
+            geocoded = result.get('geocoded', 0)
+            if geocoded:
+                print(f"    Geocoded {geocoded} venues.")
+            else:
+                print(f"    All venues already have coordinates.")
+        except Exception as e:
+            print(f"    Warning: Venue geocoding failed: {str(e)[:200]}")
+
+    if config.refresh_teams:
+        print("  Refreshing teams...")
+        try:
+            refresh_teams(mongo.db, config.league, dry_run=dry_run)
+            print("    Done.")
+        except Exception as e:
+            print(f"    Warning: Refreshing teams failed: {str(e)[:200]}")
+
+    # Backfill conference data if league uses conference features
+    if config.league.extra_feature_stats and any(
+        s.startswith('conf_') or s == 'same_conf'
+        for s in config.league.extra_feature_stats
+    ):
+        print("  Backfilling team conferences from ESPN groups...")
+        try:
+            from bball_app.core.services.espn_sync import refresh_team_conferences
+            refresh_team_conferences(mongo.db, config.league, dry_run=dry_run)
+            print("    Done.")
+        except Exception as e:
+            print(f"    Warning: Conference backfill failed: {str(e)[:200]}")
+
     if config.refresh_players:
         print("  Refreshing players...")
         try:
@@ -193,6 +238,42 @@ def run_post_processing(config: PipelineConfig, dry_run: bool = False):
             print("    Done.")
         except Exception as e:
             print(f"    Warning: Refreshing players failed: {str(e)[:200]}")
+
+
+def run_rosters(config: PipelineConfig, dry_run: bool = False):
+    """Build team rosters for all seasons from player game data."""
+    if not config.build_rosters:
+        print("  Skipping roster build (disabled in config)")
+        return
+
+    from bball_app.core.services.roster_service import build_rosters
+    from bball_app.core.mongo import Mongo
+
+    print("  Building rosters...")
+
+    if dry_run:
+        print("    [DRY RUN] Would build rosters for all seasons")
+        return
+
+    try:
+        mongo = Mongo()
+        league = config.league
+
+        # Determine seasons to process (same range as ESPN pull)
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        end_year = current_year + 1 if current_month > 8 else current_year
+
+        total_teams = 0
+        for start_year in range(league.start_year, end_year):
+            season = f"{start_year}-{start_year + 1}"
+            count = build_rosters(mongo.db, season, league=league, dry_run=False)
+            total_teams += count
+
+        print(f"    Done - {total_teams} team-season rosters built.")
+
+    except Exception as e:
+        print(f"    Warning: Roster build failed: {str(e)[:200]}")
 
 
 def run_injuries(config: PipelineConfig, dry_run: bool = False):
@@ -203,7 +284,7 @@ def run_injuries(config: PipelineConfig, dry_run: bool = False):
 
     print("  Computing injuries...")
     cmd = [
-        sys.executable, "-m", "nba_app.core.pipeline.injuries_pipeline",
+        sys.executable, "-m", "bball_app.core.pipeline.injuries_pipeline",
         config.league.league_id
     ]
 
@@ -241,8 +322,8 @@ def run_injuries(config: PipelineConfig, dry_run: bool = False):
 
 def run_elo_cache(config: PipelineConfig, dry_run: bool = False):
     """Refresh ELO cache."""
-    from nba_app.core.stats.elo_cache import EloCache
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.stats.elo_cache import EloCache
+    from bball_app.core.mongo import Mongo
 
     if not config.cache_elo:
         print("  Skipping ELO cache (disabled in config)")
@@ -268,7 +349,7 @@ def run_training_generation(config: PipelineConfig, dry_run: bool = False, **kwa
     print(f"  Generating training data ({config.training.workers} workers, {config.training.chunk_size} chunk size)...")
 
     cmd = [
-        sys.executable, "-m", "nba_app.core.pipeline.training_pipeline",
+        sys.executable, "-m", "bball_app.core.pipeline.training_pipeline",
         config.league.league_id,
         "--workers", str(config.training.workers),
         "--chunk-size", str(config.training.chunk_size),
@@ -312,8 +393,8 @@ def run_training_generation(config: PipelineConfig, dry_run: bool = False, **kwa
 
 def run_csv_registration(config: PipelineConfig, dry_run: bool = False):
     """Register master CSV in MongoDB."""
-    from nba_app.core.services.training_data import register_existing_master_csv
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.services.training_data import register_existing_master_csv
+    from bball_app.core.mongo import Mongo
 
     if not config.register_csv:
         print("  Skipping CSV registration (disabled in config)")
@@ -335,20 +416,83 @@ def run_csv_registration(config: PipelineConfig, dry_run: bool = False):
         return False
 
 
-def render_progress(state: PipelineState):
-    """Render progress summary."""
+def ensure_indexes(league_config: LeagueConfig):
+    """Ensure MongoDB indexes exist for the league's collections before ingestion."""
+    from bball_app.core.mongo import Mongo
+
+    db = Mongo().db
+    colls = league_config.collections
+
+    index_specs = [
+        (colls["games"], [("game_id", 1)], {"unique": True}),
+        (colls["player_stats"], [("game_id", 1), ("player_id", 1)], {"unique": True}),
+        (colls["player_stats"], [("player_id", 1), ("season", 1)], {}),
+        (colls["players"], [("player_id", 1)], {"unique": True}),
+        (colls["venues"], [("venue_guid", 1)], {"unique": True}),
+        (colls["teams"], [("abbreviation", 1)], {}),
+        (colls["rosters"], [("team", 1), ("season", 1)], {}),
+    ]
+
+    created = 0
+    for coll_name, keys, kwargs in index_specs:
+        existing = db[coll_name].index_information()
+        # Check if an equivalent index already exists
+        key_list = [(k, int(d)) for k, d in keys]
+        already_exists = any(
+            idx.get("key") == key_list for idx in existing.values()
+        )
+        if not already_exists:
+            db[coll_name].create_index(keys, **kwargs)
+            created += 1
+
+    if created:
+        print(f"  Created {created} MongoDB index(es)")
+    else:
+        print(f"  All indexes already exist")
+
+
+def render_progress(state: PipelineState, final: bool = False):
+    """Render a live progress bar for ESPN data pull."""
     with state.lock:
         completed = sum(1 for p in state.seasons.values() if p.status == Status.SUCCESS)
         failed = sum(1 for p in state.seasons.values() if p.status == Status.FAILED)
         running = sum(1 for p in state.seasons.values() if p.status == Status.RUNNING)
         total_games = sum(p.games_found for p in state.seasons.values())
-        total_players = sum(p.players_found for p in state.seasons.values())
         total = len(state.seasons)
+        done = completed + failed
 
-    print(f"  Progress: {completed}/{total} seasons | {total_games:,} games | {total_players:,} player stats")
-    if running > 0:
+        start_times = [p.start_time for p in state.seasons.values() if p.start_time]
+        elapsed = (time.time() - min(start_times)) if start_times else 0
         running_seasons = [s for s, p in state.seasons.items() if p.status == Status.RUNNING]
-        print(f"  Running: {', '.join(running_seasons[:5])}")
+
+    # Format elapsed
+    mins, secs = divmod(int(elapsed), 60)
+    hours, mins = divmod(mins, 60)
+    elapsed_str = f"{hours}h {mins:02d}m {secs:02d}s" if hours > 0 else f"{mins:02d}m {secs:02d}s"
+
+    pct = (done / total * 100) if total > 0 else 0
+    bar_width = 30
+    filled = int(bar_width * pct / 100)
+    bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
+
+    rate = total_games / elapsed if elapsed > 0 else 0
+
+    line = (
+        f"\r  [{bar}] {pct:5.1f}% | "
+        f"{done}/{total} seasons | "
+        f"{total_games:,} games | "
+        f"{rate:,.1f} games/s | "
+        f"{elapsed_str}"
+    )
+    if running_seasons and not final:
+        line += f" | active: {', '.join(running_seasons[:4])}"
+
+    if final:
+        print(line)
+        if failed > 0:
+            print(f"  Failed seasons: {failed}")
+    else:
+        print(line, end="", flush=True)
 
 
 def main():
@@ -359,10 +503,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python -m nba_app.core.pipeline.full_pipeline nba
-    python -m nba_app.core.pipeline.full_pipeline cbb --max-workers 8
-    python -m nba_app.core.pipeline.full_pipeline nba --seasons 2023-2024,2024-2025
-    python -m nba_app.core.pipeline.full_pipeline cbb --dry-run
+    python -m bball_app.core.pipeline.full_pipeline nba
+    python -m bball_app.core.pipeline.full_pipeline cbb --max-workers 8
+    python -m bball_app.core.pipeline.full_pipeline nba --seasons 2023-2024,2024-2025
+    python -m bball_app.core.pipeline.full_pipeline cbb --dry-run
         """
     )
     parser.add_argument("league", choices=available_leagues,
@@ -379,6 +523,8 @@ Examples:
                        help="Skip post-processing (venues, players)")
     parser.add_argument("--skip-injuries", action="store_true",
                        help="Skip injury computation")
+    parser.add_argument("--skip-rosters", action="store_true",
+                       help="Skip roster build")
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without modifying data")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -404,9 +550,13 @@ Examples:
 
     pipeline_start = time.time()
 
+    # Step 0: Ensure indexes
+    print("[0/7] Ensuring MongoDB indexes...")
+    ensure_indexes(league_config)
+
     # Step 1: ESPN data pull
     if not args.skip_espn:
-        print("[1/6] ESPN data pull...")
+        print("[1/7] ESPN data pull...")
 
         # Get season date ranges
         all_seasons = get_season_date_ranges(league_config)
@@ -430,6 +580,17 @@ Examples:
                 end_date=end_date
             )
 
+        # Background progress rendering
+        stop_progress = threading.Event()
+
+        def progress_loop():
+            while not stop_progress.is_set():
+                render_progress(state)
+                stop_progress.wait(0.5)
+
+        progress_thread = threading.Thread(target=progress_loop, daemon=True)
+        progress_thread.start()
+
         # Run parallel ESPN pulls
         with ThreadPoolExecutor(max_workers=config.espn_max_workers) as executor:
             futures = {}
@@ -447,40 +608,50 @@ Examples:
                 except Exception as e:
                     state.update_season(season, status=Status.FAILED, error=str(e))
 
-        # Summary
-        render_progress(state)
+        # Stop progress thread and render final summary
+        stop_progress.set()
+        progress_thread.join(timeout=1)
+        render_progress(state, final=True)
     else:
-        print("[1/6] ESPN data pull... SKIPPED")
+        print("[1/7] ESPN data pull... SKIPPED")
 
     # Step 2: Post-processing
     if not args.skip_post:
-        print("\n[2/6] Post-processing...")
+        print("\n[2/7] Post-processing...")
         run_post_processing(config, args.dry_run)
     else:
-        print("\n[2/6] Post-processing... SKIPPED")
+        print("\n[2/7] Post-processing... SKIPPED")
 
     # Step 3: Injury computation
     if not args.skip_injuries:
-        print("\n[3/6] Injury computation...")
+        print("\n[3/7] Injury computation...")
         run_injuries(config, args.dry_run)
     else:
-        print("\n[3/6] Injury computation... SKIPPED")
+        print("\n[3/7] Injury computation... SKIPPED")
 
     # Step 4: ELO cache
-    print("\n[4/6] ELO cache...")
+    print("\n[4/7] ELO cache...")
     run_elo_cache(config, args.dry_run)
 
     # Step 5: Training generation
     if not args.skip_training:
-        print("\n[5/6] Master training generation...")
+        print("\n[5/7] Master training generation...")
         success = run_training_generation(config, args.dry_run)
         if not success:
             print("  Warning: Training generation had issues")
     else:
-        print("\n[5/6] Master training generation... SKIPPED")
+        print("\n[5/7] Master training generation... SKIPPED")
 
-    # Step 6: CSV registration
-    print("\n[6/6] CSV registration...")
+    # Step 6: Roster build (for prediction use — NOT used by training generation,
+    # which gets player data directly from player_stats game records)
+    if not args.skip_rosters:
+        print("\n[6/7] Roster build...")
+        run_rosters(config, args.dry_run)
+    else:
+        print("\n[6/7] Roster build... SKIPPED")
+
+    # Step 7: CSV registration
+    print("\n[7/7] CSV registration...")
     run_csv_registration(config, args.dry_run)
 
     # Final summary

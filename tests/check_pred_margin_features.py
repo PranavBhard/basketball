@@ -4,23 +4,14 @@
 import sys
 import os
 
-# Add project root to sys.path (like tests do)
-script_dir = os.path.dirname(os.path.abspath(__file__))  # nba_app/tests/
-nba_app_dir = os.path.dirname(script_dir)  # nba_app/
-if nba_app_dir not in sys.path:
-    sys.path.insert(0, nba_app_dir)
+# Add project root to sys.path
+script_dir = os.path.dirname(os.path.abspath(__file__))  # bball_app/tests/
+bball_app_dir = os.path.dirname(script_dir)  # bball_app/
+project_root = os.path.dirname(bball_app_dir)  # basketball/
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# Set working directory to nba_app to ensure relative imports work
-os.chdir(nba_app_dir)
-
-# Mock the config to avoid import issues
-import sys
-from types import SimpleNamespace
-sys.modules['nba_app.config'] = SimpleNamespace(config={
-    'mongo_conn_str': 'mongodb://localhost:27017/heroku_jrgd55fg'
-})
-
-from cli.Mongo import Mongo
+from bball_app.core.mongo import Mongo
 
 def main():
     # Simple check without connecting to DB first

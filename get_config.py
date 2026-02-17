@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, '/Users/pranav/Documents/NBA')
 
 import json
-from nba_app.core.mongo import Mongo
+from bball_app.core.mongo import Mongo
 from bson import json_util
 
 db = Mongo().client.nba

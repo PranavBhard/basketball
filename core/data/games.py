@@ -12,7 +12,7 @@ from datetime import datetime
 from .base import BaseRepository
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 
 class GamesRepository(BaseRepository):

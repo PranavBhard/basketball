@@ -3,15 +3,15 @@
 
 import sys
 import os
-sys.path.append(os.getcwd())
 
-from pymongo import MongoClient
-from config import config
+# Add project root to path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+bball_app_dir = os.path.dirname(script_dir)
+project_root = os.path.dirname(bball_app_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-class Mongo:
-    def __init__(self):
-        self.client = MongoClient(config['mongo_conn_str'])
-        self.db = self.client.heroku_jrgd55fg
+from bball_app.core.mongo import Mongo
 
 def main():
     mongo = Mongo()

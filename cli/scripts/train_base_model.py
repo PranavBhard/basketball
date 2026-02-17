@@ -5,10 +5,10 @@ Train Base Model CLI Script
 Thin wrapper around TrainingService.train_base_model().
 
 Usage:
-    python -m nba_app.cli.scripts.train_base_model <league> [options]
+    python -m bball_app.cli.scripts.train_base_model <league> [options]
 
 Examples:
-    python -m nba_app.cli.scripts.train_base_model nba --model LR --c-value 0.1 \
+    python -m bball_app.cli.scripts.train_base_model nba --model LR --c-value 0.1 \
         --train-seasons 2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022 \
         --calibration-seasons 2023 --evaluation-seasons 2024 \
         --features "points|season|avg|diff,assists|season|avg|diff" \
@@ -85,8 +85,8 @@ Model Types:
     args = parser.parse_args()
 
     # Import here to avoid slow imports on --help
-    from nba_app.core.league_config import load_league_config
-    from nba_app.core.services.training_service import TrainingService
+    from bball_app.core.league_config import load_league_config
+    from bball_app.core.services.training_service import TrainingService
 
     # Load league config
     league = load_league_config(args.league)

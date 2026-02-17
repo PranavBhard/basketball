@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
-from nba_app.core.services.matchup_chat.schemas import SharedContext
-from nba_app.core.services.prediction import PredictionService
-from nba_app.core.market.kalshi import get_game_market_data
-from nba_app.core.services.espn_odds import get_live_pregame_lines
+from bball_app.core.services.matchup_chat.schemas import SharedContext
+from bball_app.core.services.prediction import PredictionService
+from bball_app.core.market.kalshi import get_game_market_data
+from bball_app.core.services.espn_odds import get_live_pregame_lines
 
 
 def _get_coll(league, key: str, fallback: str) -> str:

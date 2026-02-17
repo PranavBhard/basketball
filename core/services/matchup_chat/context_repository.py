@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
 
-from nba_app.core.services.matchup_chat.schemas import HistoryEntry, LatestPointer, SharedContext, utc_now_iso
+from bball_app.core.services.matchup_chat.schemas import HistoryEntry, LatestPointer, SharedContext, utc_now_iso
 
 
 class SharedContextRepository:

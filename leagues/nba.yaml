@@ -5,26 +5,25 @@ meta:
   logo_url: /static/imgs/NBA-Logo.png
 
 mongo:
-  # Uses the DB configured in `core/mongo.py` unless overridden here.
-  # db_name: heroku_jrgd55fg
+  # Database name is parsed from mongo_conn_str in config.py
   collections:
-    games: stats_nba
-    player_stats: stats_nba_players
-    players: players_nba
-    teams: teams_nba
+    games: nba_games
+    player_stats: nba_player_stats
+    players: nba_players
+    teams: nba_teams
     venues: nba_venues
     rosters: nba_rosters
 
-    model_config_classifier: model_config_nba
-    model_config_points: model_config_points_nba
+    model_config_classifier: nba_model_config
+    model_config_points: nba_model_config_points
     model_predictions: nba_model_predictions
-    experiment_runs: experiment_runs
+    experiment_runs: nba_experiment_runs
 
-    master_training_metadata: master_training_data_nba
+    master_training_metadata: nba_master_training_metadata
 
-    cached_league_stats: cached_league_stats
-    elo_cache: nba_cached_elo_ratings
-    jobs: jobs_nba
+    cached_league_stats: nba_cached_league_stats
+    elo_cache: nba_elo_cache
+    jobs: nba_jobs
 
 paths:
   # Keep existing default master training location (parent/master_training/MASTER_TRAINING.csv).
@@ -347,10 +346,10 @@ news_sources:
       team_lineups: /basketball/nba/teams/{team_slug}/lineups
       team_depth: /basketball/nba/teams/{team_slug}/depth-chart
       team_injuries: /basketball/nba/teams/{team_slug}/injuries
-      # Player-level
-      player: /basketball/nba/player/{player_slug}
-      player_news: /basketball/nba/player/{player_slug}/news
-      player_projections: /basketball/nba/player/{player_slug}/projections
+      # Player-level (note: no /nba/ in player URLs)
+      player: /basketball/player/{player_slug}
+      player_news: /basketball/player/{player_slug}/news
+      player_projections: /basketball/player/{player_slug}/projections
       # Game-level
       daily_lineups: /basketball/nba/lineups
 
@@ -743,6 +742,7 @@ pipelines:
       - post_processing:
           refresh_venues: true
           refresh_players: true
+          build_rosters: true
           compute_injuries: true
       - cache_elo: true
       - generate_training:

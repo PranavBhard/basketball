@@ -65,7 +65,7 @@ class FeatureRegistry:
     Single Source of Truth for all feature definitions.
 
     Usage:
-        from nba_app.core.feature_registry import FeatureRegistry
+        from bball_app.core.feature_registry import FeatureRegistry
 
         # Get all valid stat names
         stats = FeatureRegistry.get_all_stat_names()
@@ -108,6 +108,7 @@ class FeatureRegistry:
             db_field="assists",
             description="Total assists",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "blocks": StatDefinition(
             name="blocks",
@@ -115,6 +116,7 @@ class FeatureRegistry:
             db_field="blocks",
             description="Total blocks",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "steals": StatDefinition(
             name="steals",
@@ -122,6 +124,7 @@ class FeatureRegistry:
             db_field="steals",
             description="Total steals",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "reb_total": StatDefinition(
             name="reb_total",
@@ -129,6 +132,7 @@ class FeatureRegistry:
             db_field="total_reb",  # Mapped from reb_total
             description="Total rebounds (offensive + defensive)",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "turnovers": StatDefinition(
             name="turnovers",
@@ -136,6 +140,7 @@ class FeatureRegistry:
             db_field="TO_metric",
             description="Turnovers",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "three_made": StatDefinition(
             name="three_made",
@@ -144,6 +149,7 @@ class FeatureRegistry:
             description="Three-pointers made",
             supports_side_split=True,
             supports_net=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
 
         # ---- Rate/Efficiency Stats ----
@@ -155,6 +161,7 @@ class FeatureRegistry:
             supports_side_split=True,
             supports_net=True,
             requires_aggregation=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "ts": StatDefinition(
             name="ts",
@@ -164,6 +171,7 @@ class FeatureRegistry:
             supports_side_split=True,
             supports_net=True,
             requires_aggregation=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "three_pct": StatDefinition(
             name="three_pct",
@@ -173,6 +181,7 @@ class FeatureRegistry:
             supports_side_split=True,
             supports_net=True,
             requires_aggregation=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "off_rtg": StatDefinition(
             name="off_rtg",
@@ -203,6 +212,7 @@ class FeatureRegistry:
             name="ast_to_ratio",
             category=StatCategory.RATE,
             description="Assist-to-turnover ratio (assists / turnovers)",
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "to_metric": StatDefinition(
             name="to_metric",
@@ -211,6 +221,7 @@ class FeatureRegistry:
             description="Turnover rate",
             supports_side_split=True,
             requires_aggregation=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
 
         # ---- Net Stats (opponent-adjusted) ----
@@ -315,58 +326,32 @@ class FeatureRegistry:
             valid_perspectives={"home", "away", "diff"},
         ),
 
-        # ---- Blend Stats (weighted combination of time periods) ----
-        "points_net_blend": StatDefinition(
-            name="points_net_blend",
-            category=StatCategory.DERIVED,
-            description="Blended net points (weighted avg of season/games_20/games_12)",
-            valid_time_periods={"none"},
-            valid_calc_weights={"blend"},  # Accepts any blend:* format
-        ),
-        "wins_blend": StatDefinition(
-            name="wins_blend",
-            category=StatCategory.DERIVED,
-            description="Blended win rate (weighted avg of season/games_20/games_12)",
-            valid_time_periods={"none"},
-            valid_calc_weights={"blend"},  # Accepts any blend:* format
-        ),
-        "efg_net_blend": StatDefinition(
-            name="efg_net_blend",
-            category=StatCategory.DERIVED,
-            description="Blended net eFG% (weighted avg of season/games_20/games_12)",
-            valid_time_periods={"none"},
-            valid_calc_weights={"blend"},  # Accepts any blend:* format
-        ),
-        "off_rtg_net_blend": StatDefinition(
-            name="off_rtg_net_blend",
-            category=StatCategory.DERIVED,
-            description="Blended net offensive rating (weighted avg of season/games_20/games_12)",
-            valid_time_periods={"none"},
-            valid_calc_weights={"blend"},  # Accepts any blend:* format
-        ),
-
         # ---- Shot Mix Stats ----
         "three_rate": StatDefinition(
             name="three_rate",
             category=StatCategory.DERIVED,
             description="Three-point attempt rate (3PA / FGA)",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "ft_rate": StatDefinition(
             name="ft_rate",
             category=StatCategory.DERIVED,
             description="Free throw rate (FTA / FGA)",
             supports_side_split=True,
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "reb_off_pct": StatDefinition(
             name="reb_off_pct",
             category=StatCategory.RATE,
             description="Offensive rebound percentage",
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "three_pct_allowed": StatDefinition(
             name="three_pct_allowed",
             category=StatCategory.RATE,
             description="Opponent 3-point percentage allowed (defensive metric)",
+            valid_calc_weights={"raw", "avg", "std"},
         ),
         "three_pct_matchup": StatDefinition(
             name="three_pct_matchup",
@@ -389,6 +374,12 @@ class FeatureRegistry:
             name="travel",
             category=StatCategory.SPECIAL,
             description="Travel distance (miles)",
+            valid_calc_weights={"raw", "avg", "sum"},
+        ),
+        "road_games": StatDefinition(
+            name="road_games",
+            category=StatCategory.SPECIAL,
+            description="Away/road games played in period",
         ),
         "b2b": StatDefinition(
             name="b2b",
@@ -413,6 +404,15 @@ class FeatureRegistry:
             name="games_played",
             category=StatCategory.SPECIAL,
             description="Games played in period (sample size)",
+        ),
+        "postseason": StatDefinition(
+            name="postseason",
+            category=StatCategory.SPECIAL,
+            description="Binary: 1 if game is postseason/playoffs, 0 otherwise",
+            supports_side_split=False,
+            valid_calc_weights={"binary"},
+            valid_time_periods={"none"},
+            valid_perspectives={"none"},
         ),
 
         # ---- Special Stats ----
@@ -675,6 +675,44 @@ class FeatureRegistry:
             valid_perspectives={"none"},  # Matchup-level, not team-specific
         ),
 
+        # ---- League-Specific Features ----
+        "conf_wins": StatDefinition(
+            name="conf_wins",
+            category=StatCategory.DERIVED,
+            description="Conference win percentage (wins vs same-conference opponents / total conference games)",
+            supports_side_split=False,
+            valid_calc_weights={"avg"},
+            valid_time_periods={"season"},
+            valid_perspectives={"home", "away", "diff"},
+        ),
+        "same_conf": StatDefinition(
+            name="same_conf",
+            category=StatCategory.DERIVED,
+            description="Binary: 1 if both teams are in the same conference, 0 otherwise",
+            supports_side_split=False,
+            valid_calc_weights={"binary"},
+            valid_time_periods={"none"},
+            valid_perspectives={"none"},
+        ),
+        "conf_gp": StatDefinition(
+            name="conf_gp",
+            category=StatCategory.DERIVED,
+            description="Number of conference games played this season",
+            supports_side_split=False,
+            valid_calc_weights={"raw"},
+            valid_time_periods={"season"},
+            valid_perspectives={"home", "away", "diff"},
+        ),
+        "conf_margin": StatDefinition(
+            name="conf_margin",
+            category=StatCategory.DERIVED,
+            description="Average margin per game against same-conference opponents this season",
+            supports_side_split=False,
+            valid_calc_weights={"avg"},
+            valid_time_periods={"season"},
+            valid_perspectives={"home", "away", "diff"},
+        ),
+
         # ---- Prediction Features (from Points Regression Models) ----
         # Format: pred_margin|none|ridge|none (calc_weight = model type)
         "pred_home": StatDefinition(
@@ -784,11 +822,148 @@ class FeatureRegistry:
                 suffix = tp[len(prefix):]
                 if suffix.isdigit() and int(suffix) > 0:
                     return True
+        # Composite time periods: blend and delta
+        if tp.startswith('blend:'):
+            parsed = cls.parse_blend_time_period(tp)
+            if parsed is None:
+                return False
+            # Validate each component is a valid base time period and weights sum to ~1.0
+            total_weight = 0.0
+            for comp_tp, weight in parsed['components']:
+                if not cls.is_valid_time_period(comp_tp):
+                    return False
+                total_weight += weight
+            if abs(total_weight - 1.0) > 0.01:
+                return False
+            return True
+
+        if tp.startswith('delta:'):
+            parsed = cls.parse_delta_time_period(tp)
+            if parsed is None:
+                return False
+            # Validate all leaf time periods
+            for leaf_tp in cls._extract_leaf_time_periods(tp):
+                if not cls.is_valid_time_period(leaf_tp):
+                    return False
+            return True
+
         return False
+
+    @classmethod
+    def parse_blend_time_period(cls, time_period: str) -> dict:
+        """
+        Parse a blend time_period string.
+
+        Input:  "blend:games_5:0.70/games_10:0.30"
+        Output: {"type": "blend", "components": [("games_5", 0.70), ("games_10", 0.30)]}
+
+        Returns None if malformed.
+        """
+        if not time_period.startswith('blend:'):
+            return None
+
+        blend_str = time_period[6:]  # Remove 'blend:' prefix
+        parts = blend_str.split('/')
+
+        components = []
+        for part in parts:
+            if ':' not in part:
+                return None
+            # Split on last ':' to get (tp, weight) — handles tp names with colons
+            idx = part.rfind(':')
+            tp = part[:idx]
+            weight_str = part[idx + 1:]
+            try:
+                weight = float(weight_str)
+            except ValueError:
+                return None
+            components.append((tp, weight))
+
+        if not components:
+            return None
+
+        return {"type": "blend", "components": components}
+
+    @classmethod
+    def parse_delta_time_period(cls, time_period: str) -> dict:
+        """
+        Parse a delta time_period string.
+
+        Input:  "delta:games_5-season"
+        Output: {"type": "delta", "recent": "games_5", "baseline": "season"}
+
+        Input:  "delta:blend:games_5:0.70/games_10:0.30-season"
+        Output: {"type": "blend_delta",
+                 "recent": {"type": "blend", "components": [("games_5", 0.70), ("games_10", 0.30)]},
+                 "baseline": "season"}
+
+        Returns None if malformed.
+        """
+        if not time_period.startswith('delta:'):
+            return None
+
+        delta_str = time_period[6:]  # Remove 'delta:' prefix
+
+        # Use rfind('-') to split recent from baseline (baseline is always a simple tp)
+        sep_idx = delta_str.rfind('-')
+        if sep_idx <= 0 or sep_idx == len(delta_str) - 1:
+            return None
+
+        recent_str = delta_str[:sep_idx]
+        baseline = delta_str[sep_idx + 1:]
+
+        # Check if recent is itself a blend
+        if recent_str.startswith('blend:'):
+            blend_parsed = cls.parse_blend_time_period(recent_str)
+            if blend_parsed is None:
+                return None
+            return {
+                "type": "blend_delta",
+                "recent": blend_parsed,
+                "baseline": baseline,
+            }
+
+        return {
+            "type": "delta",
+            "recent": recent_str,
+            "baseline": baseline,
+        }
+
+    @classmethod
+    def _extract_leaf_time_periods(cls, time_period: str) -> list:
+        """
+        Extract all base (leaf) time periods from any composite time period.
+
+        "season"                                        -> ["season"]
+        "blend:games_5:0.70/games_10:0.30"              -> ["games_5", "games_10"]
+        "delta:games_5-season"                           -> ["games_5", "season"]
+        "delta:blend:games_5:0.70/games_10:0.30-season"  -> ["games_5", "games_10", "season"]
+        """
+        if time_period.startswith('blend:'):
+            parsed = cls.parse_blend_time_period(time_period)
+            if parsed is None:
+                return [time_period]
+            return [tp for tp, _ in parsed['components']]
+
+        if time_period.startswith('delta:'):
+            parsed = cls.parse_delta_time_period(time_period)
+            if parsed is None:
+                return [time_period]
+
+            leaves = []
+            if parsed['type'] == 'blend_delta':
+                # Recent is a blend
+                leaves.extend(tp for tp, _ in parsed['recent']['components'])
+            else:
+                leaves.append(parsed['recent'])
+            leaves.append(parsed['baseline'])
+            return leaves
+
+        return [time_period]
 
     # Legacy set for backwards compatibility (common time periods)
     VALID_TIME_PERIODS: Set[str] = {
-        "season", "games_5", "games_10", "games_12", "games_20",
+        "season", "games_2", "games_3", "games_5", "games_10", "games_12", "games_20",
         "months_1", "days_2", "days_3", "days_5", "days_12", "none",
         "games_close5",
         "last_3", "last_5",  # H2H cross-season lookups
@@ -817,6 +992,10 @@ class FeatureRegistry:
         "beta",  # Beta-prior-smoothed win probability
         "eb",    # Empirical Bayes shrinkage for margin
         "logw",  # Log-weighted margin (scales by sample size)
+        # Binary features
+        "binary",  # Binary indicator (0 or 1)
+        # Aggregation types
+        "sum",  # Sum/total (e.g., total travel distance)
     }
 
     # Parameterized calc weight patterns (accept integer k values)
@@ -1076,10 +1255,34 @@ class FeatureRegistry:
 
     @classmethod
     def validate_time_period(cls, time_period: str) -> Tuple[bool, Optional[str]]:
-        """Validate a time period."""
+        """Validate a time period (including composite blend/delta formats)."""
         if cls.is_valid_time_period(time_period):
             return True, None
-        return False, f"Invalid time period: '{time_period}'. Valid formats: 'season', 'none', 'games_N', 'days_N', 'months_N' (N = positive integer)"
+
+        # Provide specific error messages for malformed composite formats
+        if time_period.startswith('blend:'):
+            parsed = cls.parse_blend_time_period(time_period)
+            if parsed is None:
+                return False, f"Malformed blend time period: '{time_period}'. Expected format: 'blend:tp1:weight1/tp2:weight2'"
+            total_weight = 0.0
+            for comp_tp, weight in parsed['components']:
+                if not cls.is_valid_time_period(comp_tp):
+                    return False, f"Invalid component time period '{comp_tp}' in blend: '{time_period}'"
+                total_weight += weight
+            if abs(total_weight - 1.0) > 0.01:
+                return False, f"Blend weights sum to {total_weight:.2f}, expected 1.0 in: '{time_period}'"
+            return True, None
+
+        if time_period.startswith('delta:'):
+            parsed = cls.parse_delta_time_period(time_period)
+            if parsed is None:
+                return False, f"Malformed delta time period: '{time_period}'. Expected format: 'delta:recent_tp-baseline_tp'"
+            for leaf_tp in cls._extract_leaf_time_periods(time_period):
+                if not cls.is_valid_time_period(leaf_tp):
+                    return False, f"Invalid leaf time period '{leaf_tp}' in delta: '{time_period}'"
+            return True, None
+
+        return False, f"Invalid time period: '{time_period}'. Valid formats: 'season', 'none', 'games_N', 'days_N', 'months_N', 'blend:...', 'delta:...' (N = positive integer)"
 
     @classmethod
     def validate_calc_weight(cls, calc_weight: str) -> Tuple[bool, Optional[str]]:
@@ -1134,9 +1337,9 @@ class FeatureRegistry:
         if base_stat in cls.STAT_DEFINITIONS:
             stat_def = cls.STAT_DEFINITIONS[base_stat]
             if stat_def.valid_time_periods:  # If restrictions exist, enforce them
-                if parsed["time_period"] not in stat_def.valid_time_periods:
-                    # Also check parameterized formats (games_N, days_N, months_N)
-                    tp = parsed["time_period"]
+                # For composite time periods, validate each leaf tp
+                leaf_tps = cls._extract_leaf_time_periods(parsed["time_period"])
+                for tp in leaf_tps:
                     is_allowed = False
                     for allowed_tp in stat_def.valid_time_periods:
                         if tp == allowed_tp:
@@ -1149,7 +1352,7 @@ class FeatureRegistry:
                                 is_allowed = True
                                 break
                     if not is_allowed:
-                        return False, f"Time period '{parsed['time_period']}' not valid for stat '{stat_name}'. Valid: {sorted(stat_def.valid_time_periods)}"
+                        return False, f"Time period '{tp}' not valid for stat '{stat_name}'. Valid: {sorted(stat_def.valid_time_periods)}"
 
         # Validate calc weight format
         valid, error = cls.validate_calc_weight(parsed["calc_weight"])
@@ -1349,8 +1552,8 @@ class FeatureGroups:
             "layer": 2,
         },
         SCHEDULE_FATIGUE: {
-            "description": "Rest, back-to-backs, travel distance",
-            "stats": ["days_rest", "b2b", "first_of_b2b", "travel", "rest"],
+            "description": "Rest, back-to-backs, travel distance, road games, postseason indicator",
+            "stats": ["days_rest", "b2b", "first_of_b2b", "travel", "road_games", "rest", "postseason"],
             "layer": 2,
         },
         SAMPLE_SIZE: {
@@ -1402,7 +1605,6 @@ class FeatureGroups:
     }
 
     # Additional group names for extended feature groups
-    BLEND_SIGNALS = "blend_signals"
     H2H = "h2h"  # Head-to-head matchup features
     CLOSE_GAMES = "close_games"  # Close game performance features
     PREDICTION_FEATURES = "prediction_features"  # Points model predictions
@@ -1410,11 +1612,6 @@ class FeatureGroups:
 
     # Extended group definitions (added separately to avoid breaking existing layer-based queries)
     EXTENDED_GROUP_DEFINITIONS: Dict[str, Dict] = {
-        BLEND_SIGNALS: {
-            "description": "Blended stats combining multiple time windows",
-            "stats": ["points_net_blend", "wins_blend", "efg_net_blend", "off_rtg_net_blend"],
-            "layer": 3,
-        },
         H2H: {
             "description": "Head-to-head matchup history between teams (season-only)",
             "stats": ["h2h_win_pct", "margin_h2h", "h2h_games_count"],
@@ -1440,30 +1637,48 @@ class FeatureGroups:
     }
 
     @classmethod
-    def get_all_group_definitions(cls) -> Dict[str, Dict]:
-        """Get all group definitions (base + extended)."""
-        return {**cls.GROUP_DEFINITIONS, **cls.EXTENDED_GROUP_DEFINITIONS}
+    def get_league_extra_group(cls, league) -> Optional[Dict]:
+        """Build a synthetic group from league's extra_features config."""
+        if not league or not hasattr(league, 'extra_feature_stats'):
+            return None
+        stats = league.extra_feature_stats
+        if not stats:
+            return None
+        return {
+            "description": f"League-specific features for {league.league_id}",
+            "stats": stats,
+            "layer": 4,
+        }
 
     @classmethod
-    def get_group_stats(cls, group_name: str) -> List[str]:
+    def get_all_group_definitions(cls, league=None) -> Dict[str, Dict]:
+        """Get all group definitions (base + extended + league-specific)."""
+        groups = {**cls.GROUP_DEFINITIONS, **cls.EXTENDED_GROUP_DEFINITIONS}
+        extra = cls.get_league_extra_group(league)
+        if extra:
+            groups["league_extra"] = extra
+        return groups
+
+    @classmethod
+    def get_group_stats(cls, group_name: str, league=None) -> List[str]:
         """Get stats in a feature group."""
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         group = all_groups.get(group_name)
         return group["stats"] if group else []
 
     @classmethod
-    def get_groups_by_layer(cls, layer: int) -> List[str]:
+    def get_groups_by_layer(cls, layer: int, league=None) -> List[str]:
         """Get all groups in a specific layer."""
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         return [
             name for name, defn in all_groups.items()
             if defn.get("layer") == layer
         ]
 
     @classmethod
-    def get_all_groups(cls) -> List[str]:
+    def get_all_groups(cls, league=None) -> List[str]:
         """Get all group names."""
-        return list(cls.get_all_group_definitions().keys())
+        return list(cls.get_all_group_definitions(league=league).keys())
 
     # =========================================================================
     # ACTUAL FEATURES GENERATED BY CALCULATORS
@@ -1705,7 +1920,7 @@ class FeatureGroups:
     ]
 
     @classmethod
-    def get_features_for_group(cls, group_name: str, include_side: bool = True) -> List[str]:
+    def get_features_for_group(cls, group_name: str, include_side: bool = True, league=None) -> List[str]:
         """
         Get ALL valid feature combinations for a feature group.
 
@@ -1726,6 +1941,7 @@ class FeatureGroups:
         Args:
             group_name: Name of the feature group (e.g., 'outcome_strength')
             include_side: Whether to include |side variants
+            league: Optional LeagueConfig to include league-specific groups
 
         Returns:
             List of all valid feature names for the group
@@ -1737,7 +1953,7 @@ class FeatureGroups:
         if group_name == cls.INJURIES:
             return sorted(cls.ACTUAL_INJURY_FEATURES)
 
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         group = all_groups.get(group_name)
         if not group:
             return []
@@ -1757,24 +1973,25 @@ class FeatureGroups:
         # Standard time periods to enumerate
         base_time_periods = ['season', 'none']
         param_time_periods = [
-            'games_5', 'games_10', 'games_12', 'games_20', 'games_50',
+            'games_2', 'games_3', 'games_5', 'games_10', 'games_12', 'games_20', 'games_50',
             'days_2', 'days_3', 'days_5', 'days_12',
             'months_1', 'months_2',
             'games_close5',
             'last_3', 'last_5',  # H2H cross-season lookups
         ]
-        all_time_periods = base_time_periods + param_time_periods
+        # Composite time periods (blend, delta, blend-delta)
+        composite_time_periods = [
+            'blend:season:0.80/games_12:0.20',
+            'blend:season:0.70/games_20:0.20/games_12:0.10',
+            'blend:games_5:0.70/games_10:0.30',
+            'delta:games_5-season',
+            'delta:games_10-season',
+            'delta:blend:games_5:0.70/games_10:0.30-season',
+        ]
+        all_time_periods = base_time_periods + param_time_periods + composite_time_periods
 
         # Default perspectives
         default_perspectives = ['diff', 'home', 'away']
-
-        # Common blend ratios used in models (expand "blend" to specific formats)
-        common_blend_ratios = [
-            'blend:season:0.80/games_12:0.20',
-            'blend:season:0.80/games_20:0.10/games_12:0.10',
-            'blend:season:0.70/games_20:0.20/games_12:0.10',
-            'blend:season:0.60/games_20:0.20/games_12:0.20',
-        ]
 
         for stat_name in stats:
             stat_def = FeatureRegistry.STAT_DEFINITIONS.get(stat_name)
@@ -1784,14 +2001,16 @@ class FeatureGroups:
             # Get valid combinations from stat definition
             calc_weights = stat_def.valid_calc_weights if stat_def.valid_calc_weights else {'raw', 'avg'}
 
-            # Expand "blend" to common blend ratios for blend stats
-            if 'blend' in calc_weights:
-                calc_weights = set(calc_weights)
-                calc_weights.discard('blend')  # Remove generic "blend"
-                calc_weights.update(common_blend_ratios)  # Add specific ratios
-
             if stat_def.valid_time_periods:
-                stat_time_periods = [tp for tp in all_time_periods if tp in stat_def.valid_time_periods]
+                stat_time_periods = []
+                for tp in all_time_periods:
+                    if tp in stat_def.valid_time_periods:
+                        stat_time_periods.append(tp)
+                    elif tp.startswith(('blend:', 'delta:')):
+                        # For composite tps, check all leaf tps are allowed
+                        leaves = FeatureRegistry._extract_leaf_time_periods(tp)
+                        if all(l in stat_def.valid_time_periods for l in leaves):
+                            stat_time_periods.append(tp)
             else:
                 stat_time_periods = all_time_periods
 
@@ -1871,49 +2090,57 @@ class FeatureGroups:
         return sorted(set(features))
 
     @classmethod
-    def get_all_features(cls, include_side: bool = True) -> Dict[str, List[str]]:
+    def get_all_features(cls, include_side: bool = True, league=None) -> Dict[str, List[str]]:
         """
         Get ALL valid features organized by group.
+
+        Args:
+            include_side: Whether to include |side variants
+            league: Optional LeagueConfig to include league-specific groups
 
         Returns:
             Dict mapping group name to list of all valid feature names
         """
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         return {
-            group_name: cls.get_features_for_group(group_name, include_side=include_side)
+            group_name: cls.get_features_for_group(group_name, include_side=include_side, league=league)
             for group_name in all_groups.keys()
         }
 
     @classmethod
-    def get_all_features_flat(cls, include_side: bool = True) -> List[str]:
+    def get_all_features_flat(cls, include_side: bool = True, league=None) -> List[str]:
         """
         Get ALL valid features as a flat list.
+
+        Args:
+            include_side: Whether to include |side variants
+            league: Optional LeagueConfig to include league-specific groups
 
         Returns:
             List of all valid feature names across all groups
         """
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         all_features = []
         for group_name in all_groups.keys():
-            all_features.extend(cls.get_features_for_group(group_name, include_side=include_side))
+            all_features.extend(cls.get_features_for_group(group_name, include_side=include_side, league=league))
         return sorted(set(all_features))
 
     @classmethod
-    def get_group_description(cls, group_name: str) -> str:
+    def get_group_description(cls, group_name: str, league=None) -> str:
         """Get the description for a feature group."""
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         group = all_groups.get(group_name)
         return group.get("description", "") if group else ""
 
     @classmethod
-    def get_group_layer(cls, group_name: str) -> int:
+    def get_group_layer(cls, group_name: str, league=None) -> int:
         """Get the layer number for a feature group."""
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         group = all_groups.get(group_name)
         return group.get("layer", 0) if group else 0
 
     @classmethod
-    def get_group_for_feature(cls, feature_name: str) -> str:
+    def get_group_for_feature(cls, feature_name: str, league=None) -> str:
         """
         Determine which group a feature belongs to.
 
@@ -1921,6 +2148,7 @@ class FeatureGroups:
 
         Args:
             feature_name: The feature name (e.g., 'margin|season|avg|diff')
+            league: Optional LeagueConfig to include league-specific groups
 
         Returns:
             Group name (e.g., 'outcome_strength', 'h2h', 'other')
@@ -1951,7 +2179,7 @@ class FeatureGroups:
             return cls.CLOSE_GAMES
 
         # Check stat-based groups
-        all_groups = cls.get_all_group_definitions()
+        all_groups = cls.get_all_group_definitions(league=league)
         for group_name, group_def in all_groups.items():
             # Skip groups with filter_substring (already handled above)
             if group_def.get('filter_substring'):

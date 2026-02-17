@@ -14,7 +14,7 @@ from threading import Lock
 
 import requests
 
-from nba_app.core.league_config import load_league_config
+from bball_app.core.league_config import load_league_config
 
 logger = logging.getLogger(__name__)
 
@@ -79,15 +79,25 @@ class KalshiPublicClient:
         self.session = requests.Session()
 
     def _get(self, path: str, params: Optional[Dict] = None) -> Dict[str, Any]:
-        """Make GET request to public API."""
+        """Make GET request to public API with retry on 429."""
+        import time as _time
         url = f"{self.BASE_URL}{path}"
-        try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Kalshi API error: {e}")
-            raise
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.session.get(url, params=params, timeout=self.timeout)
+                if response.status_code == 429 and attempt < max_retries:
+                    wait = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s
+                    _time.sleep(wait)
+                    continue
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries and hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
+                    _time.sleep(0.5 * (2 ** attempt))
+                    continue
+                logger.error(f"Kalshi API error: {e}")
+                raise
 
     def get_event(self, event_ticker: str) -> Dict[str, Any]:
         """
@@ -207,6 +217,7 @@ def build_event_ticker(
         series_ticker = league.raw.get("market", {}).get("series_ticker", "KXNBAGAME")
     except Exception:
         series_ticker = "KXNBAGAME"
+        logger.warning(f"Could not load series_ticker from league config for '{league_id}', using default")
 
     return f"{series_ticker}-{year_2digit}{month_abbrev}{day_2digit}{kalshi_away}{kalshi_home}"
 
@@ -268,7 +279,7 @@ def parse_event_ticker(
 
             # Also add all ESPN abbreviations as valid (they often match)
             try:
-                from nba_app.core.mongo import Mongo
+                from bball_app.core.mongo import Mongo
                 db = Mongo().db
                 league = load_league_config(league_id)
                 teams_coll = league.collections.get("teams", "cbb_teams")
@@ -508,7 +519,7 @@ def find_game_from_event_ticker(
     Returns:
         Game document from database, or None if not found
     """
-    from nba_app.core.mongo import Mongo
+    from bball_app.core.mongo import Mongo
 
     # Parse the event ticker
     parsed = parse_event_ticker(event_ticker, league_id)
@@ -529,7 +540,7 @@ def find_game_from_event_ticker(
         league = load_league_config(league_id)
         games_collection = league.collections.get("games", "stats_nba")
     except Exception:
-        games_collection = "stats_nba" if league_id == "nba" else f"{league_id}_stats_games"
+        games_collection = f"{league_id}_stats_games" if league_id != "nba" else "stats_nba"
 
     # Format date for query
     date_str = game_date.strftime("%Y-%m-%d")
@@ -553,10 +564,10 @@ def find_game_from_event_ticker(
             "homeTeam.name": {"$regex": f"^{home_internal}$", "$options": "i"},
         })
 
-    # Strategy 3: For CBB, try matching by team_id if available
-    if not game and league_id == "cbb":
+    # Strategy 3: For leagues using team_id (CBB, WCBB), try matching by team_id
+    if not game and league_id != "nba":
         # Look up team IDs
-        teams_collection = league.collections.get("teams", "cbb_teams")
+        teams_collection = league.collections.get("teams", f"{league_id}_teams")
         away_team_doc = db[teams_collection].find_one({"abbreviation": away_internal})
         home_team_doc = db[teams_collection].find_one({"abbreviation": home_internal})
 
@@ -605,7 +616,8 @@ def get_kalshi_events_for_date(
         league = load_league_config(league_id)
         series_ticker = league.raw.get("market", {}).get("series_ticker", "KXNBAGAME")
     except Exception:
-        series_ticker = "KXNBAGAME" if league_id == "nba" else "KXNCAAMBGAME"
+        series_ticker = "KXNBAGAME"
+        logger.warning(f"Could not load series_ticker from league config for '{league_id}', using default")
 
     client = KalshiPublicClient()
     all_events = []
@@ -674,8 +686,9 @@ def match_portfolio_to_games(
         series_ticker = league.raw.get("market", {}).get("series_ticker", "KXNBAGAME")
         spread_series_ticker = league.raw.get("market", {}).get("spread_series_ticker", "KXNBASPREAD")
     except Exception:
-        series_ticker = "KXNBAGAME" if league_id == "nba" else "KXNCAAMBGAME"
-        spread_series_ticker = "KXNBASPREAD" if league_id == "nba" else "KXNCAAMBSPREAD"
+        series_ticker = "KXNBAGAME"
+        spread_series_ticker = "KXNBASPREAD"
+        logger.warning(f"Could not load series/spread tickers from league config for '{league_id}', using defaults")
 
     # Build event tickers for all games (both winner and spread tickers)
     game_tickers = {}  # event_ticker -> game_id (for winner markets)
@@ -975,6 +988,9 @@ def match_portfolio_to_games(
                 pnl_cents = settlement.get('pnl', 0)
                 status = 'won' if pnl_cents > 0 else 'lost'
                 pnl = pnl_cents / 100.0
+                # If lost and pnl is 0 (settlement missing cost_basis), use negative cost
+                if status == 'lost' and pnl == 0:
+                    pnl = -cost
             else:
                 status = 'live'
                 pnl = 0
@@ -1108,6 +1124,9 @@ def match_portfolio_to_games(
                     pnl_cents = settlement.get('pnl', 0)
                     status = 'won' if pnl_cents > 0 else 'lost'
                     pnl = pnl_cents / 100.0
+                    # If lost and pnl is 0 (settlement missing cost_basis), use negative cost
+                    if status == 'lost' and pnl == 0:
+                        pnl = -cost
                 else:
                     status = 'live'
                     pnl = 0

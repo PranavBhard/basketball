@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}NBA Predictions{% endblock %}</title>
+    <title>{% block title %}{{ g.league.display_name }} Predictions{% endblock %}</title>
     <style>
         * {
             margin: 0;
@@ -314,7 +314,7 @@
             </div>
         </div>
         <nav class="nav-menu">
-            <a href="{{ url_for('index') }}" class="nav-item">Games</a>
+            <a href="{{ url_for('index', league_id=league_id) }}" class="nav-item">Games</a>
             <div class="nav-dropdown">
                 <span class="nav-dropdown-toggle">
                     Modeling
@@ -323,10 +323,10 @@
                     </svg>
                 </span>
                 <div class="nav-dropdown-menu">
-                    <a href="{{ url_for('model_config') }}" class="nav-dropdown-item">Classification Models</a>
-                    <a href="{{ url_for('ensemble_config') }}" class="nav-dropdown-item">Ensemble Models</a>
-                    <a href="{{ url_for('model_config_points') }}" class="nav-dropdown-item">Points Regression Models</a>
-                    <a href="{{ url_for('master_training') }}" class="nav-dropdown-item">Master Training Data</a>
+                    <a href="{{ url_for('model_config', league_id=league_id) }}" class="nav-dropdown-item">Classification Models</a>
+                    <a href="{{ url_for('ensemble_config', league_id=league_id) }}" class="nav-dropdown-item">Ensemble Models</a>
+                    <a href="{{ url_for('model_config_points', league_id=league_id) }}" class="nav-dropdown-item">Points Regression Models</a>
+                    <a href="{{ url_for('master_training', league_id=league_id) }}" class="nav-dropdown-item">Master Training Data</a>
                 </div>
             </div>
             <div class="nav-dropdown">
@@ -337,10 +337,10 @@
                     </svg>
                 </span>
                 <div class="nav-dropdown-menu">
-                    <a href="{{ url_for('elo_manager') }}" class="nav-dropdown-item">Elo Ratings</a>
-                    <a href="{{ url_for('injuries_manager') }}" class="nav-dropdown-item">Injuries</a>
-                    <a href="{{ url_for('cached_league_stats_manager') }}" class="nav-dropdown-item">Cached League Stats</a>
-                    <a href="{{ url_for('espn_db_audit_manager') }}" class="nav-dropdown-item">ESPN DB Audit</a>
+                    <a href="{{ url_for('elo_manager', league_id=league_id) }}" class="nav-dropdown-item">Elo Ratings</a>
+                    <a href="{{ url_for('injuries_manager', league_id=league_id) }}" class="nav-dropdown-item">Injuries</a>
+                    <a href="{{ url_for('cached_league_stats_manager', league_id=league_id) }}" class="nav-dropdown-item">Cached League Stats</a>
+                    <a href="{{ url_for('espn_db_audit_manager', league_id=league_id) }}" class="nav-dropdown-item">ESPN DB Audit</a>
                 </div>
             </div>
             <div class="nav-dropdown">
@@ -351,7 +351,7 @@
                     </svg>
                 </span>
                 <div class="nav-dropdown-menu">
-                    <a href="{{ url_for('market_dashboard') }}" class="nav-dropdown-item">Dashboard</a>
+                    <a href="{{ url_for('market_dashboard', league_id=league_id) }}" class="nav-dropdown-item">Dashboard</a>
                 </div>
             </div>
         </nav>

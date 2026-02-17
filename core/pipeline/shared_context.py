@@ -12,7 +12,7 @@ and made league-aware using LeagueConfig.
 from typing import List, Dict, Optional, Any
 import threading
 
-from nba_app.core.league_config import LeagueConfig
+from bball_app.core.league_config import LeagueConfig
 
 
 class SharedFeatureContext:
@@ -53,18 +53,18 @@ class SharedFeatureContext:
                            If None, loads all seasons.
         """
         self.preload_seasons = preload_seasons
-        from nba_app.core.mongo import Mongo
-        from nba_app.core.stats.handler import StatHandlerV2
-        from nba_app.core.stats.per_calculator import PERCalculator
-        from nba_app.core.data import GamesRepository, RostersRepository
-        from nba_app.core.utils.collection import import_collection
+        from bball_app.core.mongo import Mongo
+        from bball_app.core.stats.handler import StatHandlerV2
+        from bball_app.core.stats.per_calculator import PERCalculator
+        from bball_app.core.data import GamesRepository, RostersRepository
+        from bball_app.core.utils.collection import import_collection
 
         self.feature_names = feature_names
         self.league_config = league_config
 
         # Get collection names from league config
         games_collection = league_config.collections.get('games', 'stats_nba')
-        teams_collection = league_config.collections.get('teams', 'teams_nba')
+        teams_collection = league_config.collections.get('teams', 'nba_teams')
 
         # Infer what components are needed based on feature names
         self._needs_per = any(
@@ -143,6 +143,14 @@ class SharedFeatureContext:
         # Initialize PER calculator if needed
         self.per_calculator = None
         if (self._needs_per or self._needs_injuries) and preload_per_cache:
+            # Ensure league stats cache exists for each season (required for PER constants)
+            from bball_app.core.stats.league_cache import ensure_season_cached
+            seasons_to_cache = self.preload_seasons or []
+            if seasons_to_cache:
+                print(f"Ensuring league stats cached for {len(seasons_to_cache)} season(s)...")
+                for season in seasons_to_cache:
+                    ensure_season_cached(season, self.db, league=league_config)
+
             if self.preload_seasons:
                 print(f"Initializing shared PER calculator (preloading seasons: {self.preload_seasons})...")
             else:
@@ -173,7 +181,7 @@ class SharedFeatureContext:
         if self._needs_elo:
             print("Preloading elo ratings cache...")
             try:
-                from nba_app.core.stats.elo_cache import EloCache
+                from bball_app.core.stats.elo_cache import EloCache
                 self._elo_cache = EloCache(self.db, league=league_config)
                 self._elo_cache.preload(seasons=self.preload_seasons)
                 # Inject into stat handler so it uses the preloaded cache
@@ -360,7 +368,8 @@ class SharedFeatureContext:
                     season=season,
                     game_date=game_date_str,
                     player_filters=None,
-                    injured_players=injured_players_dict
+                    injured_players=injured_players_dict,
+                    game_id=game_id  # Enable cross-team aggregation for traded players
                 )
                 if per_features:
                     for fname in self.feature_names:

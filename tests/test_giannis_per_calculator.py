@@ -14,8 +14,8 @@ parent_of_nba_app = os.path.dirname(nba_app_dir)  # Directory containing nba_app
 if parent_of_nba_app not in sys.path:
     sys.path.insert(0, parent_of_nba_app)
 
-from nba_app.core.mongo import Mongo
-from nba_app.core.stats.per_calculator import PERCalculator
+from bball_app.core.mongo import Mongo
+from bball_app.core.stats.per_calculator import PERCalculator
 
 def test_giannis_per_calculator():
     """Test why Giannis and another player are not found in PER calculator."""

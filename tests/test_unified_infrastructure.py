@@ -12,7 +12,7 @@ def test_unified_infrastructure():
     
     core_modules = [
         ("ModelConfigManager", "Centralized MongoDB config management"),
-        ("ModelFactory", "Unified model creation with artifact support"),
+        ("ArtifactLoader", "Unified model creation with artifact support"),
         ("FeatureManager", "Standardized feature blocks and naming"),
         ("ModelBusinessLogic", "Unified training and prediction workflows"),
         ("ArtifactManager", "Centralized artifact storage and cleanup")
@@ -25,7 +25,7 @@ def test_unified_infrastructure():
     
     web_app_updates = [
         "✅ Replaced run_training_job() with unified ModelBusinessLogic.train_model()",
-        "✅ Updated get_nba_model() to use ModelFactory with artifact prioritization",
+        "✅ Updated get_nba_model() to use ArtifactLoader with artifact prioritization",
         "✅ Integrated ModelConfigManager for all config operations",
         "✅ Added FeatureManager for standardized feature handling",
         "✅ Uses ArtifactManager for consistent artifact storage"
@@ -56,7 +56,7 @@ def test_unified_infrastructure():
             "flow": [
                 "1. ModelConfigManager.create_from_request() → Validate input",
                 "2. ModelBusinessLogic.train_model() → Train with artifacts",
-                "3. ModelFactory.save_model_artifacts() → Save .pkl files",
+                "3. ArtifactLoader.save_model_artifacts() → Save .pkl files",
                 "4. ModelConfigManager.save_config() → Store in MongoDB"
             ]
         },
@@ -64,7 +64,7 @@ def test_unified_infrastructure():
             "name": "Model Loading",
             "flow": [
                 "1. ModelConfigManager.get_selected_config() → Get from MongoDB",
-                "2. ModelFactory.create_model() → Load from artifacts (fast)",
+                "2. ArtifactLoader.create_model() → Load from artifacts (fast)",
                 "3. Fallback to retraining if artifacts missing",
                 "4. BballModel instance ready for predictions"
             ]
@@ -90,8 +90,8 @@ def test_unified_infrastructure():
     migrations = [
         ("✅ Web App", "Updated to use unified infrastructure"),
         ("🔄 Modeler Agent", "Ready for migration to ModelConfigManager"),
-        ("📋 CLI", "Uses ModelFactory for loading"),
-        ("🧪 Stacking Tool", "Already uses ModelFactory for artifacts")
+        ("📋 CLI", "Uses ArtifactLoader for loading"),
+        ("🧪 Stacking Tool", "Already uses ArtifactLoader for artifacts")
     ]
     
     for component, status in migrations:

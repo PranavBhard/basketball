@@ -4,8 +4,8 @@ import json
 import re
 from typing import Any, Dict, List
 
-from nba_app.agents.matchup_network.base import load_rendered_system_message, simple_chat_completion
-from nba_app.agents.utils.json_compression import encode_message_content
+from bball_app.agents.matchup_network.base import load_rendered_system_message, simple_chat_completion
+from bball_app.agents.utils.json_compression import encode_message_content
 
 
 def _extract_json_object(text: str) -> str:

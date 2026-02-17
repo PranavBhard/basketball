@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Regression test for ModelFactory._train_from_data numeric coercion.
+"""Regression test for ArtifactLoader._train_from_data numeric coercion.
 
-This reproduces the failure seen in the web UI when ModelFactory falls back to
+This reproduces the failure seen in the web UI when ArtifactLoader falls back to
 training from a CSV that includes a non-numeric feature column.
 
 Historically this crashed with:
@@ -25,7 +25,7 @@ if project_root not in sys.path:
 
 
 def test_model_factory_train_from_data_coerces_to_numeric() -> bool:
-    from nba_app.core.models.factory import ModelFactory
+    from bball_app.core.models.artifact_loader import ArtifactLoader
 
     # Create a CSV with one non-numeric feature column that previously caused
     # np.isnan to crash due to object dtype.
@@ -44,7 +44,7 @@ def test_model_factory_train_from_data_coerces_to_numeric() -> bool:
         'training_csv': path,
     }
 
-    model, scaler, feature_names = ModelFactory.create_model(config, use_artifacts=False)
+    model, scaler, feature_names = ArtifactLoader.create_model(config, use_artifacts=False)
 
     assert model is not None
     assert scaler is not None

@@ -32,10 +32,10 @@ def _ensure_pythonpath():
 def main():
     _ensure_pythonpath()
 
-    from nba_app.core.mongo import Mongo
-    from nba_app.core.league_config import load_league_config
-    from nba_app.core.services.matchup_chat import Controller
-    from nba_app.core.services.matchup_chat.schemas import ControllerOptions
+    from bball_app.core.mongo import Mongo
+    from bball_app.core.league_config import load_league_config
+    from bball_app.core.services.matchup_chat import Controller
+    from bball_app.core.services.matchup_chat.schemas import ControllerOptions
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--league", default="nba")

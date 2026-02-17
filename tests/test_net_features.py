@@ -19,8 +19,8 @@ nba_dir = os.path.dirname(nba_app_dir)  # NBA/
 if nba_dir not in sys.path:
     sys.path.insert(0, nba_dir)
 
-from nba_app.core.stats.handler import StatHandlerV2
-from nba_app.core.mongo import Mongo
+from bball_app.core.stats.handler import StatHandlerV2
+from bball_app.core.mongo import Mongo
 from datetime import date
 from collections import defaultdict
 

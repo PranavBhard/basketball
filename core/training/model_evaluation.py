@@ -10,7 +10,7 @@ import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score, log_loss, brier_score_loss
 
-from nba_app.core.training.model_factory import create_model_with_c
+from bball_app.core.training.model_factory import create_model_with_c
 
 
 def evaluate_model_combo(
@@ -261,7 +261,10 @@ def evaluate_model_combo_with_calibration(
         'n_folds': 1,  # For compatibility, but this is a single split, not cross-validation
         'split_type': 'time_based_calibration',  # Indicates this is time-based split, not CV folds
         'calibration_years': calibration_years,
-        'evaluation_year': evaluation_year
+        'evaluation_year': evaluation_year,
+        'train_set_size': len(X_train),
+        'calibrate_set_size': len(X_cal),
+        'eval_set_size': len(X_eval),
     }
 
 

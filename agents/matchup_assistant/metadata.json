@@ -1,9 +1,0 @@
-{
-  "agent_name": "matchup_assistant",
-  "version": "1.0.0",
-  "description": "NBA matchup analysis assistant for game predictions and player statistics",
-  "config": {
-    "temperature": 0.3,
-    "max_tokens": 2000
-  }
-}

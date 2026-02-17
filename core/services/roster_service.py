@@ -17,10 +17,10 @@ import logging
 from collections import defaultdict
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from nba_app.core.data.rosters import RostersRepository
+from bball_app.core.data.rosters import RostersRepository
 
 if TYPE_CHECKING:
-    from nba_app.core.league_config import LeagueConfig
+    from bball_app.core.league_config import LeagueConfig
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +142,11 @@ def build_rosters(
     int : number of team rosters upserted
     """
     if league is not None:
-        player_stats_col = league.collections.get('player_stats', 'stats_nba_players')
-        players_col = league.collections.get('players', 'players_nba')
+        player_stats_col = league.collections.get('player_stats', 'nba_player_stats')
+        players_col = league.collections.get('players', 'nba_players')
     else:
-        player_stats_col = 'stats_nba_players'
-        players_col = 'players_nba'
+        player_stats_col = 'nba_player_stats'
+        players_col = 'nba_players'
 
     logger.info("Building rosters for season %s (player_stats=%s, players=%s)",
                 season, player_stats_col, players_col)
