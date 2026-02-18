@@ -1,0 +1,577 @@
+# Basketball Stat Definitions
+# Declarative definitions for all stats used in feature computation.
+# Loaded by sportscore.features.load_stat_definitions -> Dict[str, StatDefinition]
+
+meta:
+  valid_time_periods: [season, none]
+  time_period_prefixes: ["games_", "days_", "months_", "games_close", "last_"]
+
+stats:
+
+  # ============================================================================
+  # BASIC COUNTING STATS
+  # ============================================================================
+  points:
+    category: basic
+    db_field: points
+    description: "Total points scored"
+    supports_side_split: true
+    supports_net: true
+    valid_calc_weights: [avg, raw, std]
+
+  wins:
+    category: basic
+    db_field: homeWon
+    description: "Number of wins"
+    supports_side_split: true
+
+  assists:
+    category: basic
+    db_field: assists
+    description: "Total assists"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  blocks:
+    category: basic
+    db_field: blocks
+    description: "Total blocks"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  steals:
+    category: basic
+    db_field: steals
+    description: "Total steals"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  reb_total:
+    category: basic
+    db_field: total_reb
+    description: "Total rebounds (offensive + defensive)"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  turnovers:
+    category: basic
+    db_field: TO_metric
+    description: "Turnovers"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  three_made:
+    category: basic
+    db_field: three_made
+    description: "Three-pointers made"
+    supports_side_split: true
+    supports_net: true
+    valid_calc_weights: [avg, raw, std]
+
+
+  # ============================================================================
+  # RATE/EFFICIENCY STATS
+  # ============================================================================
+  efg:
+    category: rate
+    db_field: effective_fg_perc
+    description: "Effective field goal percentage"
+    supports_side_split: true
+    supports_net: true
+    requires_aggregation: true
+    valid_calc_weights: [avg, raw, std]
+
+  ts:
+    category: rate
+    db_field: true_shooting_perc
+    description: "True shooting percentage"
+    supports_side_split: true
+    supports_net: true
+    requires_aggregation: true
+    valid_calc_weights: [avg, raw, std]
+
+  three_pct:
+    category: rate
+    db_field: three_perc
+    description: "Three-point percentage"
+    supports_side_split: true
+    supports_net: true
+    requires_aggregation: true
+    valid_calc_weights: [avg, raw, std]
+
+  off_rtg:
+    category: rate
+    db_field: off_rtg
+    description: "Offensive rating (points per 100 possessions)"
+    supports_side_split: true
+    supports_net: true
+    requires_aggregation: true
+
+  def_rtg:
+    category: rate
+    db_field: def_rtg
+    description: "Defensive rating (points allowed per 100 possessions)"
+    supports_side_split: true
+
+  assists_ratio:
+    category: rate
+    db_field: assists_ratio
+    description: "Assist ratio (assists per 100 possessions)"
+    supports_side_split: true
+    supports_net: true
+    requires_aggregation: true
+
+  ast_to_ratio:
+    category: rate
+    description: "Assist-to-turnover ratio (assists / turnovers)"
+    valid_calc_weights: [avg, raw, std]
+
+  to_metric:
+    category: rate
+    db_field: TO_metric
+    description: "Turnover rate"
+    supports_side_split: true
+    requires_aggregation: true
+    valid_calc_weights: [avg, raw, std]
+
+  reb_off_pct:
+    category: rate
+    description: "Offensive rebound percentage"
+    valid_calc_weights: [avg, raw, std]
+
+  three_pct_allowed:
+    category: rate
+    description: "Opponent 3-point percentage allowed (defensive metric)"
+    valid_calc_weights: [avg, raw, std]
+
+
+  # ============================================================================
+  # NET STATS (OPPONENT-ADJUSTED)
+  # ============================================================================
+  points_net:
+    category: net
+    description: "Points minus opponent points allowed to teams"
+    supports_side_split: true
+
+  efg_net:
+    category: net
+    description: "EFG% minus opponent EFG% against"
+    supports_side_split: true
+
+  ts_net:
+    category: net
+    description: "TS% minus opponent TS% against"
+    supports_side_split: true
+
+  three_pct_net:
+    category: net
+    description: "3P% minus opponent 3P% against"
+    supports_side_split: true
+
+  off_rtg_net:
+    category: net
+    description: "Offensive rating minus opponent defensive rating"
+    supports_side_split: true
+
+  assists_ratio_net:
+    category: net
+    description: "Assist ratio minus opponent assist ratio against"
+    supports_side_split: true
+
+  three_made_net:
+    category: net
+    description: "3PM minus opponent 3PM against"
+    supports_side_split: true
+
+
+  # ============================================================================
+  # DERIVED/MATCHUP STATS
+  # ============================================================================
+  pace:
+    category: derived
+    db_field: pace
+    description: "Pace (possessions per 48 minutes)"
+
+  pace_interaction:
+    category: derived
+    description: "Matchup-level pace interaction (harmonic mean of both teams' pace). Single value per game."
+    valid_calc_weights: [harmonic_mean]
+    valid_time_periods: [games_10, games_12, games_20, games_5, games_50, months_1, months_2, season]
+    valid_perspectives: [none]
+
+  est_possessions:
+    category: derived
+    description: "Estimated possessions for matchup (pace_interaction value). Single value per game."
+    valid_calc_weights: [derived]
+    valid_time_periods: [games_10, games_12, games_20, games_5, games_50, months_1, months_2, season]
+    valid_perspectives: [none]
+
+  exp_points_off:
+    category: derived
+    description: "Expected offensive points (possessions × offensive efficiency)"
+    valid_calc_weights: [derived]
+    valid_time_periods: [games_10, games_12, games_20, games_5, games_50, months_1, months_2, season]
+    valid_perspectives: [away, diff, home]
+
+  exp_points_def:
+    category: derived
+    description: "Expected defensive points allowed (possessions × opponent efficiency)"
+    valid_calc_weights: [derived]
+    valid_time_periods: [games_10, games_12, games_20, games_5, games_50, months_1, months_2, season]
+    valid_perspectives: [away, diff, home]
+
+  exp_points_matchup:
+    category: derived
+    description: "Expected points from matchup ((exp_points_off + opp_exp_points_def) / 2)"
+    valid_calc_weights: [derived]
+    valid_time_periods: [games_10, games_12, games_20, games_5, games_50, months_1, months_2, season]
+    valid_perspectives: [away, diff, home]
+
+  three_rate:
+    category: derived
+    description: "Three-point attempt rate (3PA / FGA)"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  ft_rate:
+    category: derived
+    description: "Free throw rate (FTA / FGA)"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+
+  three_pct_matchup:
+    category: derived
+    description: "Three-point matchup metric (team 3PT% vs opp 3PT% defense)"
+    valid_calc_weights: [derived]
+    valid_perspectives: [away, home]
+
+  margin:
+    category: derived
+    description: "Point differential (home_score - away_score) per game"
+    supports_side_split: true
+    valid_calc_weights: [avg, raw, std]
+    valid_time_periods: [games_10, games_20, games_5, season]
+
+  close_win_pct:
+    category: derived
+    description: "Win percentage in close games (decided by <=5 points)"
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_close5, season]
+
+  h2h_win_pct:
+    category: derived
+    description: "Head-to-head win percentage (team's wins / total H2H games)"
+    supports_side_split: true
+    valid_calc_weights: [beta, raw]
+    valid_time_periods: [last_3, last_5, season]
+    valid_perspectives: [away, diff, home]
+
+  margin_h2h:
+    category: derived
+    description: "Point margin in head-to-head games"
+    supports_side_split: true
+    valid_calc_weights: [avg, eb, logw]
+    valid_time_periods: [last_3, last_5, season]
+    valid_perspectives: [away, diff, home]
+
+  conf_wins:
+    category: derived
+    description: "Conference win percentage (wins vs same-conference opponents / total conference games)"
+    valid_calc_weights: [avg]
+    valid_time_periods: [season]
+    valid_perspectives: [away, diff, home]
+
+  same_conf:
+    category: derived
+    description: "Binary: 1 if both teams are in the same conference, 0 otherwise"
+    valid_calc_weights: [binary]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+
+  conf_gp:
+    category: derived
+    description: "Number of conference games played this season"
+    valid_calc_weights: [raw]
+    valid_time_periods: [season]
+    valid_perspectives: [away, diff, home]
+
+  conf_margin:
+    category: derived
+    description: "Average margin per game against same-conference opponents this season"
+    valid_calc_weights: [avg]
+    valid_time_periods: [season]
+    valid_perspectives: [away, diff, home]
+
+  vegas_implied_prob:
+    category: derived
+    description: "Implied win probability from moneyline: if ML<0: (-ML)/(-ML+100), else: 100/(ML+100)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+    valid_perspectives: [away, diff, home]
+
+  vegas_edge:
+    category: derived
+    description: "Edge between implied prob and spread-derived prob: implied_prob - spread_prob, where spread_prob = 1/(1+exp(-spread/6.5))"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+    valid_perspectives: [away, diff, home]
+
+
+  # ============================================================================
+  # SPECIAL STATS
+  # ============================================================================
+  home_court:
+    category: special
+    description: "Binary home court indicator"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+    valid_perspectives: [home]
+
+  travel:
+    category: special
+    description: "Travel distance (miles)"
+    valid_calc_weights: [avg, raw, sum]
+
+  road_games:
+    category: special
+    description: "Away/road games played in period"
+
+  b2b:
+    category: special
+    description: "Back-to-back indicator (playing second game in consecutive days)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+
+  first_of_b2b:
+    category: special
+    description: "First of back-to-back indicator (team plays again tomorrow)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+
+  days_rest:
+    category: special
+    description: "Days of rest before game"
+
+  games_played:
+    category: special
+    description: "Games played in period (sample size)"
+
+  postseason:
+    category: special
+    description: "Binary: 1 if game is postseason/playoffs, 0 otherwise"
+    valid_calc_weights: [binary]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+
+  elo:
+    category: special
+    db_field: elo
+    description: "Elo rating"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none, season]
+
+  inj_impact:
+    category: special
+    description: "Injury impact blend: 0.45*severity + 0.35*top1_per + 0.20*rotation"
+    valid_calc_weights: [blend:severity:0.45/top1_per:0.35/rotation:0.20]
+
+  inj_severity:
+    category: special
+    description: "Proportion of rotation minutes lost: inj_min_lost / team_rotation_mpg"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none, season]
+
+  inj_min_lost:
+    category: special
+    description: "Total expected minutes lost to injury (sum of injured players' MPG)"
+    valid_calc_weights: [raw]
+
+  inj_per:
+    category: special
+    description: "PER value lost to injuries. DEPRECATED: top3_sum confounds team quality with injury impact; use inj_per_share|none|top3_sum instead"
+    valid_calc_weights: [top1_avg, top3_sum, weighted_MIN]
+
+  inj_per_share:
+    category: special
+    description: "Fraction of top-team PER that is injured: inj_top3_sum / team_top3_sum. Measures 'how much of their best talent is missing' instead of raw talent value."
+    valid_calc_weights: [top1_avg, top3_sum]
+
+  inj_per_weighted_share:
+    category: special
+    description: "Normalized weighted PER lost: inj_per_weighted_MIN / team_per_weighted_MPG. Minutes-weighted share of team talent missing."
+    valid_calc_weights: [weighted_MIN]
+
+  inj_rotation_per:
+    category: special
+    description: "Proportion of rotation players injured: injured_rotation_mpg / total_rotation_mpg"
+    valid_calc_weights: [raw]
+
+  inj_star_share:
+    category: special
+    description: "Injured star's share of top-3 star mass (0 if star not out): star_score(STAR) / sum(top3 star_scores)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+
+  inj_star_score_share:
+    category: special
+    description: "Top-3 injured star mass as share of team top-3: sum(inj_top3 star_scores) / sum(team_top3 star_scores), clipped to [0, 1.5]"
+    valid_calc_weights: [top3_sum]
+    valid_time_periods: [none]
+
+  inj_top1_star_out:
+    category: special
+    description: "Binary: is top-1 usage star injured? 1.0 if top1({USAGE_PLAYERS}) in {INJ_PLAYERS} else 0.0"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+
+  player_team_per:
+    category: special
+    description: "Team-level PER aggregation"
+    valid_calc_weights: [avg, weighted_MPG]
+
+  player_starters_per:
+    category: special
+    description: "Starting lineup average PER (top 5 by starts or MPG)"
+    valid_calc_weights: [avg]
+
+  player_per_1:
+    category: special
+    description: "PER of #1 player by MPG"
+    valid_calc_weights: [raw, weighted_MIN_REC]
+
+  player_per_2:
+    category: special
+    description: "PER of #2 player by MPG"
+    valid_calc_weights: [raw]
+
+  player_per_3:
+    category: special
+    description: "PER of #3 player by MPG"
+    valid_calc_weights: [raw]
+
+  player_per:
+    category: special
+    description: "Team PER aggregations (topN avg/weighted/sum)"
+    valid_calc_weights: [top1_avg, top1_weighted_MPG, top2_avg, top2_weighted_MPG, top3_avg, top3_sum, top3_weighted_MPG]
+
+  player_starter_per:
+    category: special
+    description: "Average PER for starting players ({STARTERS} set)"
+    valid_calc_weights: [avg]
+    valid_time_periods: [season]
+
+  player_bench_per:
+    category: special
+    description: "Minute-weighted PER for bench players ({BENCH} = {ROTATION} - {STARTERS})"
+    valid_calc_weights: [weighted_MIN_REC, weighted_MIN_REC(k=35), weighted_MIN_REC(k=40), weighted_MIN_REC(k=45), weighted_MIN_REC(k=50), weighted_MPG]
+    valid_time_periods: [season]
+
+  player_rotation_per:
+    category: special
+    description: "Minute-weighted PER for rotation players ({ROTATION} = top active by MPG, max 10)"
+    valid_calc_weights: [weighted_MIN_REC, weighted_MIN_REC(k=20), weighted_MIN_REC(k=25), weighted_MIN_REC(k=30), weighted_MIN_REC(k=35), weighted_MPG]
+    valid_time_periods: [season]
+
+  player_starter_bench_per_gap:
+    category: special
+    description: "Gap between starter and bench PER: player_starter_per|avg - player_bench_per|weighted_MIN_REC(k=N)"
+    valid_calc_weights: [derived(k=35), derived(k=40), derived(k=45), derived(k=50)]
+    valid_time_periods: [season]
+
+  player_star_score:
+    category: special
+    description: "Star score (PER × MIN) aggregations for {ROTATION}. top1/top3 = season avg, *_MIN_REC = recency-weighted"
+    valid_calc_weights: [top1, top1_MIN_REC(k=20), top1_MIN_REC(k=25), top1_MIN_REC(k=30), top1_MIN_REC(k=35), top3_MIN_REC(k=20), top3_MIN_REC(k=25), top3_MIN_REC(k=30), top3_MIN_REC(k=35), top3_avg, top3_sum]
+    valid_time_periods: [season]
+
+  player_star_share:
+    category: special
+    description: "Star concentration: top1 or top3 star_score as share of total rotation star_score"
+    valid_calc_weights: [top1_share, top1_share_MIN_REC(k=20), top1_share_MIN_REC(k=25), top1_share_MIN_REC(k=30), top1_share_MIN_REC(k=35), top3_share, top3_share_MIN_REC(k=20), top3_share_MIN_REC(k=25), top3_share_MIN_REC(k=30), top3_share_MIN_REC(k=35)]
+    valid_time_periods: [season]
+
+  player_star_score_all:
+    category: special
+    description: "Top star score from {USAGE_PLAYERS} (includes injured in sorting)"
+    valid_calc_weights: [top1]
+    valid_time_periods: [season]
+
+  player_rotation_count:
+    category: special
+    description: "Number of players in {ROTATION} (depth indicator)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [season]
+
+  player_continuity:
+    category: special
+    description: "Rotation cohesion proxy: avg(min(1, GP/GP_THRESH)) for {ROTATION}"
+    valid_calc_weights: [avg]
+    valid_time_periods: [season]
+
+  rest:
+    category: special
+    description: "Rest days before game"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+
+  h2h_games_count:
+    category: special
+    description: "Number of head-to-head games played (sample size indicator)"
+    supports_side_split: true
+    valid_calc_weights: [raw]
+    valid_time_periods: [last_3, last_5, season]
+    valid_perspectives: [none]
+
+  pred_home:
+    category: special
+    description: "Predicted home team points from selected points model"
+    valid_calc_weights: [elasticnet, randomforest, ridge, xgboost]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+
+  pred_away:
+    category: special
+    description: "Predicted away team points from selected points model"
+    valid_calc_weights: [elasticnet, randomforest, ridge, xgboost]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+
+  pred_margin:
+    category: special
+    description: "Predicted point differential (home - away) from selected points model"
+    valid_calc_weights: [elasticnet, randomforest, ridge, xgboost]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+
+  pred_total:
+    category: special
+    description: "Predicted total points (home + away) from selected points model"
+    valid_calc_weights: [elasticnet, randomforest, ridge, xgboost]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+
+  vegas_ML:
+    category: special
+    db_field: vegas
+    description: "Vegas moneyline odds (American format, e.g., -150 for favorite, +130 for underdog)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+    valid_perspectives: [away, diff, home]
+
+  vegas_spread:
+    category: special
+    db_field: vegas
+    description: "Vegas point spread (home: raw value where negative = home favored; away: negated)"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+    valid_perspectives: [away, home]
+
+  vegas_ou:
+    category: special
+    db_field: vegas
+    description: "Vegas over/under total points line"
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+    valid_perspectives: [none]
+

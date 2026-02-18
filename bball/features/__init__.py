@@ -11,7 +11,8 @@ Import them directly: from bball.features.generator import SharedFeatureGenerato
 """
 
 # Registry - central feature definitions
-from bball.features.registry import FeatureRegistry, FeatureGroups
+from bball.features.registry import FeatureRegistry
+from bball.features.groups import FeatureGroups
 
 # Feature sets
 from bball.features.sets import FEATURE_SETS

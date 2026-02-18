@@ -55,6 +55,24 @@ espn:
     scoreboard_header_with_odds_example: cli/structure_examples/espn_api_game_resp_with_odds.md
     game_summary_example: cli/structure_examples/espn_api_single_game.md
 
+elo:
+  starting_rating: 1500
+  home_advantage: 100
+  # Strategy: "static" uses fixed k_factor. "dynamic" (future) uses k_schedule.
+  strategy: static
+  k_factor: 20
+  # Dynamic K schedule (not yet implemented — structure ready for future use):
+  # k_schedule:
+  #   - {max_games: 20, k: 18}
+  #   - {max_games: 50, k: 15}
+  #   - {default: 12}
+  # home_advantage_overrides:
+  #   playoffs: 80
+
+training:
+  min_games_played: 20
+  team_string_columns: [Home, Away]
+
 season:
   timezone: America/New_York
   # Same as existing logic: season rolls over after August.
@@ -62,6 +80,17 @@ season:
   exclude_game_types:
     - preseason
     - allstar
+  season_overrides:
+    # Per-season exceptions to normal start/end dates.
+    # COVID-19: 2019-2020 ended in October bubble, 2020-2021 started late.
+    "2019-2020":
+      end_month: 10
+      end_day: 11
+      notes: "NBA bubble in Orlando"
+    "2020-2021":
+      start_month: 12
+      start_day: 22
+      notes: "Delayed start due to COVID"
   # Mapping from ESPN season.type -> our standardized game_type.
   # ESPN observed: 1=preseason, 2=regular season, 3=postseason, 5=play-in.
   game_type_map:

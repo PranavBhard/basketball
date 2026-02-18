@@ -43,7 +43,10 @@ class ModelBusinessLogic:
             # Save artifacts for future fast loading
             run_id = config.get('run_id')
             if run_id:
-                ArtifactLoader.save_model_artifacts(model, scaler, feature_names, config, run_id)
+                ArtifactLoader.save_model_artifacts(
+                    model, scaler, feature_names, config, run_id,
+                    db=db, collection_name='nba_model_config'
+                )
             
             # Calculate training metrics
             training_metrics = ModelBusinessLogic._calculate_training_metrics(model, scaler, feature_names)

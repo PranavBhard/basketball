@@ -3340,6 +3340,11 @@ def get_game_features(league_id=None):
         # Get ensemble breakdown if present (for base model feature values)
         ensemble_breakdown = features_dict.get('_ensemble_breakdown')
 
+        # Extract normalized values for display (raw vs what meta-model sees)
+        meta_normalized_values = {}
+        if ensemble_breakdown:
+            meta_normalized_values = ensemble_breakdown.get('meta_normalized_values', {})
+
         return jsonify({
             'success': True,
             'game_id': game_id,
@@ -3351,7 +3356,8 @@ def get_game_features(league_id=None):
             'away_injured_players': away_injured_players,
             'feature_players': feature_players,  # Player lists for each player feature
             'total_features': len(feature_names),
-            'ensemble_breakdown': ensemble_breakdown  # Base model feature values for ensemble models
+            'ensemble_breakdown': ensemble_breakdown,  # Base model feature values for ensemble models
+            'meta_normalized_values': meta_normalized_values  # Normalized values for meta-model features
         })
     except Exception as e:
         import traceback

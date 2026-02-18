@@ -46,6 +46,23 @@ espn:
     game_summary_pregame_example: cli/structure_examples/espn_cbb_api_pre_game.md
     game_summary_postgame_example: cli/structure_examples/espn_cbb_api_post_game.md
 
+elo:
+  starting_rating: 1500
+  home_advantage: 100
+  strategy: static
+  k_factor: 20
+  # Dynamic K schedule (future):
+  # k_schedule:
+  #   - {max_games: 10, k: 35}
+  #   - {max_games: 20, k: 25}
+  #   - {default: 18}
+  # home_advantage_overrides:
+  #   tournament: 75
+
+training:
+  min_games_played: 10
+  team_string_columns: [Home, Away]
+
 season:
   timezone: America/New_York
   season_cutover_month: 8

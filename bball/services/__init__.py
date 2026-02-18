@@ -11,111 +11,95 @@ This module contains high-level service orchestration:
 - LineupService: Live game lineup data from ESPN
 - NewsService: News/content fetcher from configured sources
 - RosterService: Build team rosters from player game stats
+
+Import directly from submodules to avoid circular imports:
+    from bball.services.prediction import PredictionService
+    from bball.services.config_manager import ModelConfigManager
 """
 
-# Prediction service
-from bball.services.prediction import PredictionService, PredictionResult, MatchupInfo
 
-# Config manager
-from bball.services.config_manager import ModelConfigManager
+def __getattr__(name):
+    """Lazy imports to avoid circular dependency with bball.models."""
+    _prediction = {"PredictionService", "PredictionResult", "MatchupInfo"}
+    if name in _prediction:
+        from bball.services import prediction
+        return getattr(prediction, name)
 
-# Business logic
-from bball.services.business_logic import ModelBusinessLogic
+    _config_manager = {"ModelConfigManager"}
+    if name in _config_manager:
+        from bball.services.config_manager import ModelConfigManager
+        return ModelConfigManager
 
-# Artifacts
-from bball.services.artifacts import ArtifactManager
+    _business_logic = {"ModelBusinessLogic"}
+    if name in _business_logic:
+        from bball.services.business_logic import ModelBusinessLogic
+        return ModelBusinessLogic
 
-# Training data
-from bball.services.training_data import (
-    TrainingDataService,
-    # Module-level constants
-    MASTER_TRAINING_PATH,
-    MASTER_COLLECTION,
-    # Convenience functions (backward compatibility)
-    get_master_training_path,
-    get_master_collection_name,
-    get_all_possible_features,
-    get_available_seasons,
-    extract_features_from_master,
-    extract_features_from_master_for_points,
-    check_master_needs_regeneration,
-    register_existing_master_csv,
-)
+    _artifacts = {"ArtifactManager"}
+    if name in _artifacts:
+        from bball.services.artifacts import ArtifactManager
+        return ArtifactManager
 
-# Training service (CLI orchestration)
-from bball.services.training_service import TrainingService
+    _training_data = {
+        "TrainingDataService", "MASTER_TRAINING_PATH", "MASTER_COLLECTION",
+        "get_master_training_path", "get_master_collection_name",
+        "get_all_possible_features", "get_available_seasons",
+        "extract_features_from_master", "extract_features_from_master_for_points",
+        "check_master_needs_regeneration", "register_existing_master_csv",
+    }
+    if name in _training_data:
+        from bball.services import training_data
+        return getattr(training_data, name)
 
-# Webpage parser
-from bball.services.webpage_parser import WebpageParser
+    if name == "TrainingService":
+        from bball.services.training_service import TrainingService
+        return TrainingService
 
-# Lineup service
-from bball.services.lineup_service import get_lineups
+    if name == "WebpageParser":
+        from bball.services.webpage_parser import WebpageParser
+        return WebpageParser
 
-# News service
-from bball.services.news_service import NewsService, FetchResult, NewsResults
+    if name == "get_lineups":
+        from bball.services.lineup_service import get_lineups
+        return get_lineups
 
-# Game service
-from bball.services.game_service import (
-    get_game_detail,
-    get_team_players,
-    get_team_info,
-)
+    _news = {"NewsService", "FetchResult", "NewsResults"}
+    if name in _news:
+        from bball.services import news_service
+        return getattr(news_service, name)
 
-# Roster service
-from bball.services.roster_service import build_rosters
+    _game = {"get_game_detail", "get_team_players", "get_team_info"}
+    if name in _game:
+        from bball.services import game_service
+        return getattr(game_service, name)
 
-# Jobs infrastructure (for background task tracking)
-from bball.services.jobs import (
-    create_job,
-    update_job_progress,
-    complete_job,
-    fail_job,
-    get_job,
-)
+    if name == "build_rosters":
+        from bball.services.roster_service import build_rosters
+        return build_rosters
+
+    _jobs = {"create_job", "update_job_progress", "complete_job", "fail_job", "get_job"}
+    if name in _jobs:
+        from bball.services import jobs
+        return getattr(jobs, name)
+
+    raise AttributeError(f"module 'bball.services' has no attribute {name!r}")
+
 
 __all__ = [
-    # Prediction
-    'PredictionService',
-    'PredictionResult',
-    'MatchupInfo',
-    # Config
+    'PredictionService', 'PredictionResult', 'MatchupInfo',
     'ModelConfigManager',
-    # Business logic
     'ModelBusinessLogic',
-    # Artifacts
     'ArtifactManager',
-    # Training data
-    'TrainingDataService',
-    'MASTER_TRAINING_PATH',
-    'MASTER_COLLECTION',
-    'get_master_training_path',
-    'get_master_collection_name',
-    'get_all_possible_features',
-    'get_available_seasons',
-    'extract_features_from_master',
-    'extract_features_from_master_for_points',
-    'check_master_needs_regeneration',
-    'register_existing_master_csv',
-    # Training service
+    'TrainingDataService', 'MASTER_TRAINING_PATH', 'MASTER_COLLECTION',
+    'get_master_training_path', 'get_master_collection_name',
+    'get_all_possible_features', 'get_available_seasons',
+    'extract_features_from_master', 'extract_features_from_master_for_points',
+    'check_master_needs_regeneration', 'register_existing_master_csv',
     'TrainingService',
-    # Webpage parser
     'WebpageParser',
-    # Lineup service
     'get_lineups',
-    # News service
-    'NewsService',
-    'FetchResult',
-    'NewsResults',
-    # Game service
-    'get_game_detail',
-    'get_team_players',
-    'get_team_info',
-    # Roster service
+    'NewsService', 'FetchResult', 'NewsResults',
+    'get_game_detail', 'get_team_players', 'get_team_info',
     'build_rosters',
-    # Jobs infrastructure
-    'create_job',
-    'update_job_progress',
-    'complete_job',
-    'fail_job',
-    'get_job',
+    'create_job', 'update_job_progress', 'complete_job', 'fail_job', 'get_job',
 ]

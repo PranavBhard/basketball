@@ -6,36 +6,43 @@ This module contains machine learning model implementations:
 - PointsRegressionTrainer: Points prediction model
 - ArtifactLoader: Factory for creating sklearn models
 - EnsemblePredictor: Ensemble model handling
+
+Import directly from submodules to avoid circular imports:
+    from bball.models.bball_model import BballModel
+    from bball.models.ensemble import EnsemblePredictor
 """
 
-# Main basketball classifier model (league-aware)
-from bball.models.bball_model import BballModel
 
-# Backward compatibility alias
-NBAModel = BballModel
+def __getattr__(name):
+    """Lazy imports to avoid circular dependency with bball.services."""
+    if name in ("BballModel", "NBAModel"):
+        from bball.models.bball_model import BballModel
+        if name == "NBAModel":
+            return BballModel
+        return BballModel
+    if name == "PointsRegressionTrainer":
+        from bball.models.points_regression import PointsRegressionTrainer
+        return PointsRegressionTrainer
+    if name in ("ArtifactLoader", "ModelFactory"):
+        from bball.models.artifact_loader import ArtifactLoader
+        if name == "ModelFactory":
+            return ArtifactLoader
+        return ArtifactLoader
+    if name == "EnsemblePredictor":
+        from bball.models.ensemble import EnsemblePredictor
+        return EnsemblePredictor
+    if name == "create_ensemble_predictor":
+        from bball.models.ensemble import create_ensemble_predictor
+        return create_ensemble_predictor
+    raise AttributeError(f"module 'bball.models' has no attribute {name!r}")
 
-# Points regression trainer
-from bball.models.points_regression import PointsRegressionTrainer
-
-# Artifact loader (model loading from disk)
-from bball.models.artifact_loader import ArtifactLoader
-
-# Backward compatibility alias
-ModelFactory = ArtifactLoader
-
-# Ensemble predictor
-from bball.models.ensemble import EnsemblePredictor, create_ensemble_predictor
 
 __all__ = [
-    # Main model
     'BballModel',
-    'NBAModel',  # Backward compatibility alias
-    # Points regression
+    'NBAModel',
     'PointsRegressionTrainer',
-    # Artifact loader
     'ArtifactLoader',
-    'ModelFactory',  # Backward compatibility alias
-    # Ensemble
+    'ModelFactory',
     'EnsemblePredictor',
     'create_ensemble_predictor',
 ]

@@ -19,7 +19,7 @@ import math
 import sys
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from sportscore.pipeline.parallel import ChunkedParallelProcessor
 from typing import List, Dict, Callable, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -487,12 +487,8 @@ def generate_training_chunked(
     else:
         print("\n[2/4] No game_id column - skipping venue GUID preload")
 
-    # Step 3: Split into chunks (only process df_to_process, not unchanged rows)
+    # Step 3: Process chunks in parallel
     print(f"\n[3/4] Processing {total_chunks} chunks with {max_workers} workers...")
-    chunks: List[Tuple[int, pd.DataFrame]] = []
-    for i in range(0, total_rows, chunk_size):
-        chunk_df = df_to_process.iloc[i:i + chunk_size].copy()
-        chunks.append((len(chunks), chunk_df))
 
     # Thread-safe progress tracking with detailed stats
     import time as time_module
@@ -564,47 +560,39 @@ def generate_training_chunked(
             stats['active_workers'] -= 1
             stats['chunks_done'] += 1
 
-    def process_chunk_with_tracking(chunk_df, chunk_idx, feature_names, shared_context, progress_cb):
-        """Wrapper to track active workers."""
+    # Track chunk indices for the closure
+    chunk_counter = [0]
+    chunk_counter_lock = threading.Lock()
+
+    def chunk_processor(chunk_df):
+        with chunk_counter_lock:
+            chunk_idx = chunk_counter[0]
+            chunk_counter[0] += 1
         on_chunk_start()
         try:
-            return process_chunk(chunk_df, chunk_idx, feature_names, shared_context, progress_cb)
+            return process_chunk(chunk_df, chunk_idx, feature_names, shared_context, update_progress)
         finally:
             on_chunk_done()
 
-    # Step 4: Process in parallel
-    results: List[Tuple[int, pd.DataFrame]] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(
-                process_chunk_with_tracking, chunk_df, chunk_idx, feature_names,
-                shared_context, update_progress
-            ): chunk_idx
-            for chunk_idx, chunk_df in chunks
-        }
-
-        for future in as_completed(futures):
-            chunk_idx = futures[future]
-            try:
-                result_df = future.result()
-                results.append((chunk_idx, result_df))
-            except Exception as e:
-                print(f"\n  Warning: Chunk {chunk_idx} failed: {e}")
+    processor = ChunkedParallelProcessor(
+        df=df_to_process,
+        process_chunk_fn=chunk_processor,
+        chunk_size=chunk_size,
+        max_workers=max_workers,
+        progress_callback=lambda done, total: None,  # real progress via update_progress inside chunks
+    )
+    combined = processor.execute()
 
     # Final progress update
     elapsed = time_module.time() - stats['start_time']
     rate = total_rows / elapsed if elapsed > 0 else 0
     print(f"\n  Completed: {total_rows:,} games in {format_time(elapsed)} ({rate:,.1f} games/sec)")
 
-    # Sort by chunk index and merge
-    results.sort(key=lambda x: x[0])
-    print(f"\n[4/4] Merging {len(results)} chunks...")
+    print(f"\n[4/4] Merging results...")
 
-    # Efficient merge: concat feature columns only, then update original df
     # Deduplicate feature_names to avoid "non-unique columns" error
     unique_features = list(dict.fromkeys(feature_names))
-    feature_chunks = [r[1][unique_features] for r in results]
-    combined = pd.concat(feature_chunks, axis=0)
+    combined = combined[unique_features]
 
     # Remove any duplicate columns from combined DataFrame
     combined = combined.loc[:, ~combined.columns.duplicated()]

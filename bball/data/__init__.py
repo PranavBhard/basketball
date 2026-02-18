@@ -45,7 +45,7 @@ Usage:
 """
 
 # Base repository
-from .base import BaseRepository
+from sportscore.db.base_repository import BaseRepository
 
 # MongoDB Repositories
 from .games import GamesRepository

@@ -3,10 +3,10 @@
 Full data pipeline for a league.
 
 Steps:
-1. ESPN data pull (parallel across seasons)
-2. Post-processing (venues, players)
-3. Injury computation
-4. ELO cache refresh
+1. Ensure MongoDB indexes
+2. ESPN data pull (parallel across seasons)
+3. Post-processing (venues, players)
+4. Parallel enrichment (injuries + ELO + rosters)
 5. Master training generation (chunked async)
 6. CSV registration
 
@@ -24,7 +24,7 @@ import os
 import time
 import threading
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from sportscore.pipeline.parallel import ParallelItemProcessor
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -38,6 +38,8 @@ if project_root not in sys.path:
 
 from bball.league_config import load_league_config, get_available_leagues, LeagueConfig
 from bball.pipeline.config import PipelineConfig
+from sportscore.pipeline import BasePipeline, StepDefinition, PipelineContext
+from sportscore.pipeline.parallel import ParallelStepGroup
 
 
 class Status(Enum):
@@ -276,7 +278,7 @@ def run_rosters(config: PipelineConfig, dry_run: bool = False):
 
 
 def run_injuries(config: PipelineConfig, dry_run: bool = False):
-    """Run injury computation using the injuries pipeline."""
+    """Run injury computation using the injuries pipeline (subprocess)."""
     if not config.compute_injuries:
         print("  Skipping injury computation (disabled in config)")
         return
@@ -494,6 +496,229 @@ def render_progress(state: PipelineState, final: bool = False):
         print(line, end="", flush=True)
 
 
+# ---------------------------------------------------------------------------
+# BasketballFullPipeline — structured pipeline using sportscore BasePipeline
+# ---------------------------------------------------------------------------
+
+class BasketballFullPipeline(BasePipeline):
+    """
+    Full data pipeline for basketball, extending sportscore's BasePipeline.
+
+    Orchestrates: indexes -> ESPN pull -> post-processing -> parallel enrichment
+    (injuries + ELO + rosters) -> training generation -> CSV registration.
+    """
+
+    def __init__(self, league_id: str, config: PipelineConfig = None,
+                 skip_espn: bool = False, skip_post: bool = False,
+                 skip_injuries: bool = False, skip_rosters: bool = False,
+                 skip_training: bool = False,
+                 seasons: List[str] = None, max_workers: int = None,
+                 dry_run: bool = False, verbose: bool = False):
+        super().__init__(league_id)
+        self.league_config = load_league_config(league_id)
+        self.config = config or PipelineConfig.from_league(self.league_config)
+        self.skip_espn = skip_espn
+        self.skip_post = skip_post
+        self.skip_injuries = skip_injuries
+        self.skip_rosters = skip_rosters
+        self.skip_training = skip_training
+        self.seasons = seasons
+        self.dry_run = dry_run
+        self.verbose = verbose
+
+        if max_workers:
+            self.config.espn_max_workers = max_workers
+
+    def define_steps(self):
+        return [
+            StepDefinition("ensure_indexes", self._step_ensure_indexes,
+                          description="Ensuring MongoDB indexes"),
+            StepDefinition("espn_pull", self._step_espn_pull,
+                          skip_condition=lambda ctx: self.skip_espn,
+                          description="ESPN data pull"),
+            StepDefinition("post_processing", self._step_post_processing,
+                          skip_condition=lambda ctx: self.skip_post,
+                          description="Post-processing"),
+            StepDefinition("parallel_enrichment", self._step_parallel_enrichment,
+                          continue_on_failure=True,
+                          description="Injuries + ELO + Rosters in parallel"),
+            StepDefinition("training_generation", self._step_training_generation,
+                          skip_condition=lambda ctx: self.skip_training,
+                          description="Master training generation"),
+            StepDefinition("csv_registration", self._step_csv_registration,
+                          description="CSV registration"),
+        ]
+
+    # -- Hooks for formatted output --
+
+    def on_step_start(self, step, index, total):
+        print(f"\n[{index + 1}/{total}] {step.description or step.name}...")
+
+    def on_step_complete(self, step, result, index, total):
+        if not result.success:
+            print(f"  FAILED: {result.error}")
+
+    def on_step_skip(self, step, index, total):
+        print(f"\n[{index + 1}/{total}] {step.description or step.name}... SKIPPED")
+
+    # -- Step implementations --
+
+    def _step_ensure_indexes(self, context: PipelineContext):
+        ensure_indexes(self.league_config)
+
+    def _step_espn_pull(self, context: PipelineContext):
+        all_seasons = get_season_date_ranges(self.league_config)
+
+        if self.seasons:
+            filter_set = set(self.seasons)
+            all_seasons = [(s, sd, ed) for s, sd, ed in all_seasons if s in filter_set]
+
+        print(f"  Seasons to process: {len(all_seasons)}")
+
+        state = PipelineState()
+        state.league = self.league_id
+        state.league_display = self.league_config.display_name
+
+        for season, start_date, end_date in all_seasons:
+            state.seasons[season] = SeasonProgress(
+                season=season, start_date=start_date, end_date=end_date
+            )
+
+        # Background progress rendering
+        stop_progress = threading.Event()
+
+        def progress_loop():
+            while not stop_progress.is_set():
+                render_progress(state)
+                stop_progress.wait(0.5)
+
+        progress_thread = threading.Thread(target=progress_loop, daemon=True)
+        progress_thread.start()
+
+        def process_fn(season_tuple):
+            season, start_date, end_date = season_tuple
+            return run_espn_pull(season, start_date, end_date, state,
+                                self.league_id, self.dry_run, self.verbose)
+
+        processor = ParallelItemProcessor(
+            items=all_seasons,
+            process_fn=process_fn,
+            max_workers=self.config.espn_max_workers,
+        )
+        results = processor.execute()
+
+        for (season, _, _), result, error in results:
+            if error:
+                state.update_season(season, status=Status.FAILED, error=str(error))
+
+        stop_progress.set()
+        progress_thread.join(timeout=1)
+        render_progress(state, final=True)
+
+    def _step_post_processing(self, context: PipelineContext):
+        run_post_processing(self.config, self.dry_run)
+
+    def _step_parallel_enrichment(self, context: PipelineContext):
+        tasks = []
+
+        if self.config.compute_injuries and not self.skip_injuries:
+            tasks.append(("injuries", self._run_injuries_direct, {}))
+        if self.config.cache_elo:
+            tasks.append(("elo_cache", lambda: run_elo_cache(self.config, self.dry_run), {}))
+        if self.config.build_rosters and not self.skip_rosters:
+            tasks.append(("rosters", lambda: run_rosters(self.config, self.dry_run), {}))
+
+        if not tasks:
+            print("  All enrichment steps skipped")
+            return
+
+        def _on_complete(name, task_result):
+            status = "OK" if task_result.success else f"FAILED: {task_result.error}"
+            duration = f"{task_result.duration_seconds:.1f}s" if task_result.duration_seconds else "?"
+            print(f"  {name}: {status} ({duration})")
+
+        def _on_error(name, task_result):
+            print(f"  {name}: FAILED: {task_result.error}")
+
+        group = ParallelStepGroup(
+            tasks=tasks,
+            max_workers=len(tasks),
+            on_complete=_on_complete,
+            on_error=_on_error,
+        )
+        results = group.execute()
+
+        # Store sub-task results in the step stats
+        context.step_results["parallel_enrichment"].stats = {
+            name: {"success": r.success, "error": r.error,
+                   "duration": r.duration_seconds}
+            for name, r in results.items()
+        }
+
+        # If any sub-task failed, note it but don't raise (continue_on_failure=True)
+        failures = [name for name, r in results.items() if not r.success]
+        if failures:
+            print(f"  Warning: Failed sub-tasks: {', '.join(failures)}")
+
+    def _run_injuries_direct(self):
+        """Run injuries pipeline as direct in-process call instead of subprocess."""
+        from bball.pipeline.injuries_pipeline import run_injuries_pipeline
+
+        if self.dry_run:
+            print("  [DRY RUN] Would compute injuries")
+            return
+
+        return run_injuries_pipeline(
+            league_config=self.league_config,
+            dry_run=self.dry_run,
+        )
+
+    def _step_training_generation(self, context: PipelineContext):
+        success = run_training_generation(self.config, self.dry_run)
+        if not success:
+            raise RuntimeError("Training generation failed")
+
+    def _step_csv_registration(self, context: PipelineContext):
+        run_csv_registration(self.config, self.dry_run)
+
+    def run(self, **kwargs) -> 'PipelineResult':
+        """Run pipeline with banner output."""
+        from sportscore.pipeline import PipelineResult
+
+        print("\n" + "=" * 70)
+        print(f"  {self.league_config.display_name} Full Pipeline")
+        print("=" * 70)
+        print(f"  League:          {self.league_id.upper()}")
+        print(f"  ESPN workers:    {self.config.espn_max_workers}")
+        print(f"  Training workers:{self.config.training.workers}")
+        print(f"  Player features: {'Yes' if self.config.training.include_player_features else 'No'}")
+        print(f"  Dry run:         {self.dry_run}")
+        print("=" * 70 + "\n")
+
+        pipeline_start = time.time()
+
+        result = super().run(dry_run=self.dry_run, verbose=self.verbose)
+
+        # Final summary
+        elapsed = int(time.time() - pipeline_start)
+        mins, secs = divmod(elapsed, 60)
+        hours, mins = divmod(mins, 60)
+
+        print("\n" + "=" * 70)
+        print("  Pipeline complete!")
+        if hours > 0:
+            print(f"  Total time: {hours}h {mins:02d}m {secs:02d}s")
+        else:
+            print(f"  Total time: {mins}m {secs:02d}s")
+        print(f"  Steps: {len(result.steps_completed)} completed, "
+              f"{len(result.steps_failed)} failed, "
+              f"{len(result.steps_skipped)} skipped")
+        print(f"  Output: {self.league_config.master_training_csv}")
+        print("=" * 70 + "\n")
+
+        return result
+
+
 def main():
     available_leagues = get_available_leagues()
 
@@ -530,144 +755,21 @@ Examples:
                        help="Show detailed output")
     args = parser.parse_args()
 
-    # Load configuration
-    league_config = load_league_config(args.league)
-    config = PipelineConfig.from_league(league_config)
+    pipeline = BasketballFullPipeline(
+        league_id=args.league,
+        skip_espn=args.skip_espn,
+        skip_post=args.skip_post,
+        skip_injuries=args.skip_injuries,
+        skip_rosters=args.skip_rosters,
+        skip_training=args.skip_training,
+        seasons=args.seasons.split(",") if args.seasons else None,
+        max_workers=args.max_workers,
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+    )
 
-    if args.max_workers:
-        config.espn_max_workers = args.max_workers
-
-    print("\n" + "=" * 70)
-    print(f"  {league_config.display_name} Full Pipeline")
-    print("=" * 70)
-    print(f"  League:          {args.league.upper()}")
-    print(f"  ESPN workers:    {config.espn_max_workers}")
-    print(f"  Training workers:{config.training.workers}")
-    print(f"  Player features: {'Yes' if config.training.include_player_features else 'No'}")
-    print(f"  Dry run:         {args.dry_run}")
-    print("=" * 70 + "\n")
-
-    pipeline_start = time.time()
-
-    # Step 0: Ensure indexes
-    print("[0/7] Ensuring MongoDB indexes...")
-    ensure_indexes(league_config)
-
-    # Step 1: ESPN data pull
-    if not args.skip_espn:
-        print("[1/7] ESPN data pull...")
-
-        # Get season date ranges
-        all_seasons = get_season_date_ranges(league_config)
-
-        # Filter seasons if specified
-        if args.seasons:
-            filter_seasons = set(args.seasons.split(","))
-            all_seasons = [(s, sd, ed) for s, sd, ed in all_seasons if s in filter_seasons]
-
-        print(f"  Seasons to process: {len(all_seasons)}")
-
-        # Initialize state
-        state = PipelineState()
-        state.league = args.league
-        state.league_display = league_config.display_name
-
-        for season, start_date, end_date in all_seasons:
-            state.seasons[season] = SeasonProgress(
-                season=season,
-                start_date=start_date,
-                end_date=end_date
-            )
-
-        # Background progress rendering
-        stop_progress = threading.Event()
-
-        def progress_loop():
-            while not stop_progress.is_set():
-                render_progress(state)
-                stop_progress.wait(0.5)
-
-        progress_thread = threading.Thread(target=progress_loop, daemon=True)
-        progress_thread.start()
-
-        # Run parallel ESPN pulls
-        with ThreadPoolExecutor(max_workers=config.espn_max_workers) as executor:
-            futures = {}
-            for season, start_date, end_date in all_seasons:
-                future = executor.submit(
-                    run_espn_pull, season, start_date, end_date, state,
-                    args.league, args.dry_run, args.verbose
-                )
-                futures[future] = season
-
-            for future in as_completed(futures):
-                season = futures[future]
-                try:
-                    future.result()
-                except Exception as e:
-                    state.update_season(season, status=Status.FAILED, error=str(e))
-
-        # Stop progress thread and render final summary
-        stop_progress.set()
-        progress_thread.join(timeout=1)
-        render_progress(state, final=True)
-    else:
-        print("[1/7] ESPN data pull... SKIPPED")
-
-    # Step 2: Post-processing
-    if not args.skip_post:
-        print("\n[2/7] Post-processing...")
-        run_post_processing(config, args.dry_run)
-    else:
-        print("\n[2/7] Post-processing... SKIPPED")
-
-    # Step 3: Injury computation
-    if not args.skip_injuries:
-        print("\n[3/7] Injury computation...")
-        run_injuries(config, args.dry_run)
-    else:
-        print("\n[3/7] Injury computation... SKIPPED")
-
-    # Step 4: ELO cache
-    print("\n[4/7] ELO cache...")
-    run_elo_cache(config, args.dry_run)
-
-    # Step 5: Training generation
-    if not args.skip_training:
-        print("\n[5/7] Master training generation...")
-        success = run_training_generation(config, args.dry_run)
-        if not success:
-            print("  Warning: Training generation had issues")
-    else:
-        print("\n[5/7] Master training generation... SKIPPED")
-
-    # Step 6: Roster build (for prediction use — NOT used by training generation,
-    # which gets player data directly from player_stats game records)
-    if not args.skip_rosters:
-        print("\n[6/7] Roster build...")
-        run_rosters(config, args.dry_run)
-    else:
-        print("\n[6/7] Roster build... SKIPPED")
-
-    # Step 7: CSV registration
-    print("\n[7/7] CSV registration...")
-    run_csv_registration(config, args.dry_run)
-
-    # Final summary
-    elapsed = int(time.time() - pipeline_start)
-    mins, secs = divmod(elapsed, 60)
-    hours, mins = divmod(mins, 60)
-
-    print("\n" + "=" * 70)
-    print("  Pipeline complete!")
-    if hours > 0:
-        print(f"  Total time: {hours}h {mins:02d}m {secs:02d}s")
-    else:
-        print(f"  Total time: {mins}m {secs:02d}s")
-    print(f"  Output: {league_config.master_training_csv}")
-    print("=" * 70 + "\n")
-
-    return 0
+    result = pipeline.run()
+    return 0 if result.success else 1
 
 
 if __name__ == "__main__":

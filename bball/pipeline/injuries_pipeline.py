@@ -16,7 +16,7 @@ import sys
 import os
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from sportscore.pipeline.parallel import ParallelItemProcessor
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
@@ -364,26 +364,27 @@ def run_injuries_pipeline(
                               end_time=time.time())
         else:
             # Process seasons in parallel
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {
-                    executor.submit(
-                        process_season, s, state, league_config, injury_manager, db, dry_run
-                    ): s for s in seasons_to_process
-                }
+            def process_fn(s):
+                return process_season(s, state, league_config, injury_manager, db, dry_run)
 
-                for future in as_completed(futures):
-                    season_name = futures[future]
-                    try:
-                        result = future.result()
-                        total_stats['games_processed'] += result.get('games_processed', 0)
-                        total_stats['games_updated'] += result.get('games_updated', 0)
-                        total_stats['total_home_injured'] += result.get('injured', 0) // 2
-                        total_stats['total_away_injured'] += result.get('injured', 0) // 2
-                        if result.get('error'):
-                            total_stats['errors'] += 1
-                    except Exception as e:
+            processor = ParallelItemProcessor(
+                items=seasons_to_process,
+                process_fn=process_fn,
+                max_workers=workers,
+            )
+            results = processor.execute()
+
+            for season_name, result, error in results:
+                if error:
+                    total_stats['errors'] += 1
+                    state.update_season(season_name, status=Status.FAILED, error=str(error))
+                elif result:
+                    total_stats['games_processed'] += result.get('games_processed', 0)
+                    total_stats['games_updated'] += result.get('games_updated', 0)
+                    total_stats['total_home_injured'] += result.get('injured', 0) // 2
+                    total_stats['total_away_injured'] += result.get('injured', 0) // 2
+                    if result.get('error'):
                         total_stats['errors'] += 1
-                        state.update_season(season_name, status=Status.FAILED, error=str(e))
 
         state.overall_phase = "Complete! ✅"
 

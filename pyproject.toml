@@ -5,6 +5,9 @@ description = "Basketball analytics platform"
 requires-python = ">=3.10"
 dependencies = ["sportscore"]
 
+[project.scripts]
+basketball = "bball.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["bball*"]
 

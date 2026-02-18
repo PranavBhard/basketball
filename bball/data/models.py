@@ -12,7 +12,7 @@ This repository provides pure data access operations.
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from datetime import datetime
 from bson import ObjectId
-from .base import BaseRepository
+from sportscore.db.base_repository import BaseRepository
 
 if TYPE_CHECKING:
     from bball.league_config import LeagueConfig

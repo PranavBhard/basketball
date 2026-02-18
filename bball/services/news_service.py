@@ -192,15 +192,12 @@ class NewsService:
             return self._id_maps_cache[map_file]
 
         # Try multiple path resolutions
-        from bball.league_config import _repo_root
-
         # project root (basketball/)
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
         # Try paths in order: project-root-relative, absolute
         candidate_paths = [
             os.path.join(project_root, map_file),  # basketball/leagues/id_maps/...
-            os.path.join(_repo_root(), map_file),  # repo_root/leagues/id_maps/...
             map_file,  # absolute path
         ]
 

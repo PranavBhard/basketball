@@ -2203,34 +2203,63 @@
             awayTeam.querySelectorAll('.prediction-banner, .points-prediction').forEach(badge => badge.remove());
             homeTeam.querySelectorAll('.prediction-banner, .points-prediction').forEach(badge => badge.remove());
             
+            // Find insertion point: after Kalshi price if it exists, otherwise after score/spread
+            const awayKalshiEl = awayTeam.querySelector('.kalshi-price');
+            const homeKalshiEl = homeTeam.querySelector('.kalshi-price');
+            const awayInsertAfter = awayKalshiEl || awayTeam.querySelector('.spread, .team-score');
+            const homeInsertAfter = homeKalshiEl || homeTeam.querySelector('.spread, .team-score');
+            
             // Add new win probability badges
             if (pred && pred.away_win_prob !== undefined && pred.away_win_prob !== null) {
                 const awayBadge = document.createElement('div');
                 awayBadge.className = 'prediction-banner';
                 awayBadge.textContent = `${Math.round(pred.away_win_prob)}%${pred.away_odds !== undefined && pred.away_odds !== null ? ` (${pred.away_odds >= 0 ? '+' : ''}${Math.round(pred.away_odds)})` : ''}`;
-                awayTeam.appendChild(awayBadge);
+                if (awayInsertAfter) {
+                    awayInsertAfter.after(awayBadge);
+                } else {
+                    awayTeam.appendChild(awayBadge);
+                }
             }
             
             if (pred && pred.home_win_prob !== undefined && pred.home_win_prob !== null) {
                 const homeBadge = document.createElement('div');
                 homeBadge.className = 'prediction-banner';
                 homeBadge.textContent = `${Math.round(pred.home_win_prob)}%${pred.home_odds !== undefined && pred.home_odds !== null ? ` (${pred.home_odds >= 0 ? '+' : ''}${Math.round(pred.home_odds)})` : ''}`;
-                homeTeam.appendChild(homeBadge);
+                if (homeInsertAfter) {
+                    homeInsertAfter.after(homeBadge);
+                } else {
+                    homeTeam.appendChild(homeBadge);
+                }
             }
             
-            // Add points prediction badges
+            // Add points prediction badges (after win probability badges)
+            const awayPredBanner = awayTeam.querySelector('.prediction-banner');
+            const homePredBanner = homeTeam.querySelector('.prediction-banner');
+            
             if (pred && pred.away_points_pred !== undefined && pred.away_points_pred !== null) {
                 const awayPointsBadge = document.createElement('div');
                 awayPointsBadge.className = 'points-prediction';
                 awayPointsBadge.textContent = `${Math.round(pred.away_points_pred)} pts`;
-                awayTeam.appendChild(awayPointsBadge);
+                if (awayPredBanner) {
+                    awayPredBanner.after(awayPointsBadge);
+                } else if (awayInsertAfter) {
+                    awayInsertAfter.after(awayPointsBadge);
+                } else {
+                    awayTeam.appendChild(awayPointsBadge);
+                }
             }
             
             if (pred && pred.home_points_pred !== undefined && pred.home_points_pred !== null) {
                 const homePointsBadge = document.createElement('div');
                 homePointsBadge.className = 'points-prediction';
                 homePointsBadge.textContent = `${Math.round(pred.home_points_pred)} pts`;
-                homeTeam.appendChild(homePointsBadge);
+                if (homePredBanner) {
+                    homePredBanner.after(homePointsBadge);
+                } else if (homeInsertAfter) {
+                    homeInsertAfter.after(homePointsBadge);
+                } else {
+                    homeTeam.appendChild(homePointsBadge);
+                }
             }
         });
 
@@ -2434,6 +2463,7 @@
                             <tbody>
                 `;
 
+                const normValues = data.meta_normalized_values || {};
                 features.forEach(f => {
                     let displayValue;
                     if (typeof f.value === 'number') {
@@ -2445,6 +2475,10 @@
                         }
                     } else {
                         displayValue = f.value;
+                    }
+                    // Show normalized value if it differs from raw
+                    if (normValues[f.name] !== undefined) {
+                        displayValue += ` <span style="color: #888; font-size: 11px;">(${normValues[f.name].toFixed(4)})</span>`;
                     }
                     html += `
                         <tr>
@@ -3167,6 +3201,7 @@
                 ${marketCell}
                 ${modelCell}
                 ${edgeCell}
+                <td class="num">${r.edge_kelly.toFixed(3)}</td>
                 ${stakeCell}
                 <td class="num"${hasFills && netValue !== null ? ` style="color:${netValue >= 0 ? '#2e7d32' : '#c62828'};font-weight:600;"` : ''}>${hasFills && netValue !== null ? `${netValue >= 0 ? '+' : '-'}$${Math.abs(netValue).toFixed(2)}` : '-'}</td>
                 <td class="num">${actionCell}</td>
@@ -3184,11 +3219,11 @@
 
         content.innerHTML = `<table class="betting-report-table">
             <thead><tr>
-                <th>Time</th><th>Team</th><th class="num">Market</th><th class="num">Model</th><th class="num">Edge</th><th class="num">Stake</th><th class="num">Net</th><th class="num">Action</th><th class="num">Changed</th>
+                <th>Time</th><th>Team</th><th class="num">Market</th><th class="num">Model</th><th class="num">Edge</th><th class="num">Kelly</th><th class="num">Stake</th><th class="num">Net</th><th class="num">Action</th><th class="num">Changed</th>
             </tr></thead>
             <tbody>${rows}</tbody>
             <tfoot><tr>
-                <td colspan="6" style="text-align:right;font-weight:700;padding:8px;">Net Gain:</td>
+                <td colspan="7" style="text-align:right;font-weight:700;padding:8px;">Net Gain:</td>
                 <td class="num" style="font-weight:700;color:${netSumColor};">${netSumStr}</td>
                 <td colspan="2"></td>
             </tr></tfoot>

@@ -14,10 +14,12 @@ This module provides:
 
 from bball.pipeline.config import PipelineConfig, TrainingConfig, SyncConfig
 from bball.pipeline.shared_context import SharedFeatureContext
+from bball.pipeline.full_pipeline import BasketballFullPipeline
 
 __all__ = [
     "PipelineConfig",
     "TrainingConfig",
     "SyncConfig",
     "SharedFeatureContext",
+    "BasketballFullPipeline",
 ]

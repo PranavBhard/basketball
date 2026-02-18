@@ -17,7 +17,7 @@ from bball.services.matchup_chat.schemas import (
     utc_now_iso,
 )
 
-from bball.agents.utils.json_compression import encode_message_content, encode_tool_output
+from agents.utils.json_compression import encode_message_content, encode_tool_output
 
 
 class Controller:
@@ -72,7 +72,7 @@ class Controller:
         # 2) Planner (LLM) -> JSON plan (fallback if invalid/unavailable)
         turn_plan: TurnPlan
         try:
-            from bball.agents.matchup_network.planner_agent import plan_turn
+            from agents.matchup_network.planner_agent import plan_turn
 
             planner_shared = self._shared_context_for_agent("planner", shared)
             turn_plan = plan_turn(
@@ -96,7 +96,7 @@ class Controller:
 
         # Record planner output with system ref (for debugging/traceability)
         try:
-            from bball.agents.matchup_network.base import load_rendered_system_message
+            from agents.matchup_network.base import load_rendered_system_message
 
             planner_system = load_rendered_system_message("planner")
             planner_system_ref = f"rendered:planner.txt sha256:{hashlib.sha256(planner_system.encode('utf-8')).hexdigest()[:12]}"
@@ -306,7 +306,7 @@ class Controller:
 
         # 4) Final synthesis (LLM; fallback if unavailable)
         try:
-            from bball.agents.matchup_network.final_synthesizer_agent import synthesize
+            from agents.matchup_network.final_synthesizer_agent import synthesize
 
             final_text = synthesize(
                 shared_context=self._shared_context_for_agent("final_synthesizer", self.repo.get(game_id) or shared),
@@ -330,7 +330,7 @@ class Controller:
                 workflow_outputs=workflow_outputs,
             )
         try:
-            from bball.agents.matchup_network.base import load_rendered_system_message
+            from agents.matchup_network.base import load_rendered_system_message
 
             fs_system = load_rendered_system_message("final_synthesizer")
             fs_system_ref = f"rendered:final_synthesizer.txt sha256:{hashlib.sha256(fs_system.encode('utf-8')).hexdigest()[:12]}"
@@ -542,8 +542,8 @@ class Controller:
 
         Uses LangChain tool calling when available; falls back to the old stub runner otherwise.
         """
-        from bball.agents.matchup_network.base import load_rendered_system_message
-        from bball.agents.matchup_network.runtime import LANGCHAIN_AVAILABLE, build_tool, run_agent_with_tools
+        from agents.matchup_network.base import load_rendered_system_message
+        from agents.matchup_network.runtime import LANGCHAIN_AVAILABLE, build_tool, run_agent_with_tools
         from pydantic import BaseModel
 
         # If tool-calling runtime isn't available, fall back to deterministic stub behavior.
@@ -767,12 +767,12 @@ class Controller:
 
         elif agent == "stats_agent":
             from bball.services.lineup_service import get_lineups
-            from bball.agents.tools.team_game_window_tools import (
+            from agents.tools.team_game_window_tools import (
                 get_team_games, get_team_stats, compare_team_stats,
                 get_head_to_head_games, get_head_to_head_stats,
             )
-            from bball.agents.tools.window_player_stats_tools import get_player_stats, get_advanced_player_stats, get_rotation_stats
-            from bball.agents.tools.code_executor import CodeExecutor
+            from agents.tools.window_player_stats_tools import get_player_stats, get_advanced_player_stats, get_rotation_stats
+            from agents.tools.code_executor import CodeExecutor
 
             # Stats agent can optionally run code
             code_exec = CodeExecutor(db=self.db)
@@ -904,7 +904,7 @@ class Controller:
 
         elif agent == "experimenter":
             from bball.services.lineup_service import get_lineups
-            from bball.agents.tools.experimenter_tools import (
+            from agents.tools.experimenter_tools import (
                 predict_game_and_persist,
                 set_player_lineup_bucket,
             )
@@ -950,7 +950,7 @@ class Controller:
             ]
 
         elif agent == "model_inspector":
-            from bball.agents.tools.model_inspector_tools import (
+            from agents.tools.model_inspector_tools import (
                 get_base_model_direction_table,
                 get_ensemble_meta_model_params,
                 get_prediction_base_outputs,
@@ -1164,7 +1164,7 @@ class Controller:
             return "\n".join(lines), tools
 
         if agent == "stats_agent":
-            from bball.agents.tools.game_tools import get_rosters
+            from agents.tools.game_tools import get_rosters
 
             # Use roster tool as best-effort lineup/injury view (sync with prediction inputs is handled by core prediction flow)
             home_roster = get_rosters(home, db=self.db) if home else {}
