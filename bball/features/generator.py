@@ -6,7 +6,9 @@ for a given game, avoiding redundant DB queries when multiple models need featur
 from the same game (e.g., ensemble base models).
 
 Key benefits:
-- Single stat handler and PER calculator instance
+- Single BasketballFeatureComputer for regular stat features
+- Single PER calculator instance
+- StatHandlerV2 retained only for injury feature computation
 - Generates superset of features needed by all models
 - Each model extracts its subset from the shared feature dict
 
@@ -18,6 +20,7 @@ from datetime import datetime
 
 from bball.stats.handler import StatHandlerV2
 from bball.stats.per_calculator import PERCalculator
+from bball.features.compute import BasketballFeatureComputer
 from bball.features.parser import parse_feature_name
 from bball.data import GamesRepository, RostersRepository
 
@@ -65,7 +68,17 @@ class SharedFeatureGenerator:
         self._games_repo = GamesRepository(db, league=league)
         self._rosters_repo = RostersRepository(db, league=league)
 
-        # Create shared stat handler (lazy load for minimal startup cost)
+        # BasketballFeatureComputer handles all regular stat features
+        self._computer = BasketballFeatureComputer(db=db, league=league)
+
+        # Preload venue cache for travel distance features
+        if preload_venues:
+            try:
+                self._computer.preload_venue_cache()
+            except Exception:
+                pass
+
+        # StatHandlerV2 retained only for injury features (get_injury_features)
         self.stat_handler = StatHandlerV2(
             statistics=[],
             use_exponential_weighting=False,
@@ -74,13 +87,6 @@ class SharedFeatureGenerator:
             lazy_load=True,
             league=league
         )
-
-        # Preload venue cache for travel distance features
-        if preload_venues:
-            try:
-                self.stat_handler.preload_venue_cache()
-            except Exception:
-                pass
 
         # Create shared PER calculator (no preload - queries on demand)
         self.per_calculator = PERCalculator(db, preload=False, league=league)
@@ -110,7 +116,13 @@ class SharedFeatureGenerator:
         self._prediction_context = context
         print(f"[SharedFeatureGenerator] Injecting context with {len(context.player_stats)} team-season keys")
 
-        # Inject into stat_handler
+        # Inject into BasketballFeatureComputer (regular features)
+        self._computer.set_preloaded_data(
+            context.games_home, context.games_away,
+            venue_cache=context.venue_cache,
+        )
+
+        # Inject into stat_handler (still needed for injury features)
         if self.stat_handler:
             self.stat_handler.games_home = context.games_home
             self.stat_handler.games_away = context.games_away
@@ -273,28 +285,15 @@ class SharedFeatureGenerator:
             else:
                 features_dict[feature_name] = 0.0
 
-        # 2. Calculate regular stat features
+        # 2. Calculate regular stat features via BasketballFeatureComputer
         _start_regular = _time.time()
-        # Debug: Check if stat_handler has preloaded games
-        has_preloaded = self.stat_handler.games_home is not None and self.stat_handler.games_away is not None
-        print(f"[SharedFeatureGenerator] stat_handler has preloaded games: {has_preloaded}")
-        if has_preloaded:
-            seasons_loaded = list(self.stat_handler.games_home.keys()) if self.stat_handler.games_home else []
-            print(f"[SharedFeatureGenerator] Seasons in games_home: {seasons_loaded}")
 
-        for feature_name in regular_features:
-            try:
-                value = self.stat_handler.calculate_feature(
-                    feature_name, home_team, away_team, season,
-                    year, month, day, self.per_calculator, venue_guid
-                )
-                features_dict[feature_name] = value if value is not None else 0.0
-                # Debug: Log rest/travel features
-                if any(x in feature_name for x in ['b2b', 'days_rest', 'travel', 'rest']):
-                    print(f"[SharedFeatureGenerator] {feature_name} = {features_dict[feature_name]} (venue_guid={venue_guid})")
-            except Exception as e:
-                print(f"[SharedFeatureGenerator] ERROR calculating {feature_name}: {e}")
-                features_dict[feature_name] = 0.0
+        regular_results = self._computer.compute_matchup_features(
+            regular_features, home_team, away_team, season,
+            game_date, venue_guid=venue_guid,
+        )
+        features_dict.update(regular_results)
+
         _elapsed_regular = _time.time() - _start_regular
         print(f"[SharedFeatureGenerator] Regular features: {_elapsed_regular:.2f}s for {len(regular_features)} features")
 
