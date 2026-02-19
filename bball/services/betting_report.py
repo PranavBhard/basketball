@@ -26,7 +26,11 @@ def generate_betting_report(
     brier_score: float,
     league: Optional["LeagueConfig"] = None,
     edge_threshold: float = 0.07,
-    force_include_game_ids: Optional[List[str]] = None
+    force_include_game_ids: Optional[List[str]] = None,
+    log_loss_score: Optional[float] = None,
+    market_brier: Optional[float] = None,
+    market_log_loss: Optional[float] = None,
+    bin_trust_weights: Optional[List[dict]] = None,
 ) -> List[BetRecommendation]:
     """
     Generate betting recommendations for games on a date.
@@ -44,6 +48,9 @@ def generate_betting_report(
         league: Optional league config
         edge_threshold: Minimum edge required (default 0.07 = 7%)
         force_include_game_ids: Game IDs to always include regardless of edge
+        log_loss_score: Model's log-loss for blended skill assessment
+        market_brier: Market baseline Brier score from market_calibration collection
+        market_log_loss: Market baseline log-loss from market_calibration collection
 
     Returns:
         List of BetRecommendation objects, sorted by game time
@@ -138,54 +145,47 @@ def generate_betting_report(
         away_edge = model_away_prob - market_away_prob
         force_this = game_id in force_set
 
-        # Check home team edge
-        if home_edge >= edge_threshold and market_home_prob > 0:
-            stake_info = calculate_stake(model_home_prob, market_home_prob, brier_score, bankroll)
+        stake_kwargs = dict(
+            log_loss_score=log_loss_score,
+            market_brier=market_brier,
+            market_log_loss=market_log_loss,
+            bin_trust_weights=bin_trust_weights,
+        )
 
-            recommendations.append(BetRecommendation(
+        def _make_rec(team, p_mod, p_mkt, edge_val):
+            si = calculate_stake(p_mod, p_mkt, brier_score, bankroll, **stake_kwargs)
+            return BetRecommendation(
                 game_id=game_id,
                 game_time=gametime,
                 game_time_formatted=gametime_formatted,
-                team=home_team,
+                team=team,
                 home_team=home_team,
                 away_team=away_team,
-                market_prob=market_home_prob,
-                market_odds=prob_to_american_odds(market_home_prob),
-                model_prob=model_home_prob,
-                model_odds=prob_to_american_odds(model_home_prob),
-                edge=home_edge,
-                edge_kelly=stake_info['edge_kelly'],
-                dog_variance_penalty=stake_info['dog_variance_penalty'],
-                stake_fraction=stake_info['stake_fraction'],
-                stake=stake_info['stake'],
-                adjusted_stake=stake_info['adjusted_stake'],
-                market_status=mkt_status
-            ))
+                market_prob=p_mkt,
+                market_odds=prob_to_american_odds(p_mkt),
+                model_prob=p_mod,
+                model_odds=prob_to_american_odds(p_mod),
+                edge=edge_val,
+                edge_kelly=si['edge_kelly'],
+                bin_trust_weight=si['bin_trust_weight'],
+                stake_fraction=si['stake_fraction'],
+                stake=si['stake'],
+                adjusted_stake=si['adjusted_stake'],
+                market_status=mkt_status,
+                p_adj=si['p_adj'],
+                skill=si['skill'],
+                shrinkage_w=si['shrinkage_w'],
+                edge_gate=si['edge_gate'],
+            )
+
+        # Check home team edge
+        if home_edge >= edge_threshold and market_home_prob > 0:
+            recommendations.append(_make_rec(home_team, model_home_prob, market_home_prob, home_edge))
             included_game_ids.add(game_id)
 
         # Check away team edge
         if away_edge >= edge_threshold and market_away_prob > 0:
-            stake_info = calculate_stake(model_away_prob, market_away_prob, brier_score, bankroll)
-
-            recommendations.append(BetRecommendation(
-                game_id=game_id,
-                game_time=gametime,
-                game_time_formatted=gametime_formatted,
-                team=away_team,
-                home_team=home_team,
-                away_team=away_team,
-                market_prob=market_away_prob,
-                market_odds=prob_to_american_odds(market_away_prob),
-                model_prob=model_away_prob,
-                model_odds=prob_to_american_odds(model_away_prob),
-                edge=away_edge,
-                edge_kelly=stake_info['edge_kelly'],
-                dog_variance_penalty=stake_info['dog_variance_penalty'],
-                stake_fraction=stake_info['stake_fraction'],
-                stake=stake_info['stake'],
-                adjusted_stake=stake_info['adjusted_stake'],
-                market_status=mkt_status
-            ))
+            recommendations.append(_make_rec(away_team, model_away_prob, market_away_prob, away_edge))
             included_game_ids.add(game_id)
 
         # Force-include: game has fills but neither side met threshold
@@ -200,26 +200,7 @@ def generate_betting_report(
             else:
                 continue
 
-            stake_info = calculate_stake(best_prob, best_mkt, brier_score, bankroll)
-            recommendations.append(BetRecommendation(
-                game_id=game_id,
-                game_time=gametime,
-                game_time_formatted=gametime_formatted,
-                team=best_team,
-                home_team=home_team,
-                away_team=away_team,
-                market_prob=best_mkt,
-                market_odds=prob_to_american_odds(best_mkt),
-                model_prob=best_prob,
-                model_odds=prob_to_american_odds(best_prob),
-                edge=best_edge,
-                edge_kelly=stake_info['edge_kelly'],
-                dog_variance_penalty=stake_info['dog_variance_penalty'],
-                stake_fraction=stake_info['stake_fraction'],
-                stake=stake_info['stake'],
-                adjusted_stake=stake_info['adjusted_stake'],
-                market_status=mkt_status
-            ))
+            recommendations.append(_make_rec(best_team, best_prob, best_mkt, best_edge))
             included_game_ids.add(game_id)
 
     # Sort by game time (chronologically)

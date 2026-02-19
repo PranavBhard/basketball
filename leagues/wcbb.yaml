@@ -23,6 +23,8 @@ mongo:
     cached_league_stats: wcbb_cached_league_stats
     elo_cache: wcbb_cached_elo_ratings
     jobs: wcbb_jobs
+    market_calibration: wcbb_market_calibration
+    bin_trust_weights: wcbb_bin_trust_weights
 
 paths:
   master_training_csv: master_training/MASTER_TRAINING_WCBB.csv
@@ -58,6 +60,17 @@ elo:
   #   - {default: 18}
   # home_advantage_overrides:
   #   tournament: 75
+
+player_filters:
+  mpg_thresh: 10
+  rotation_size: 10
+  gp_ratio_early: 0.35
+  gp_ratio_late: 0.18
+  gp_floor_early: 3
+  gp_floor_late: 10
+  gp_floor_phase_games: 20
+  min_team_games_for_filter: 5
+  use_or_rule: true
 
 training:
   min_games_played: 10
@@ -221,6 +234,9 @@ pipelines:
       - espn_pull:
           parallel: true
           max_workers: 8
+      - odds_backfill:
+          max_workers: 4
+          min_season: "2024-2025"
       - post_processing:
           refresh_venues: true
           refresh_players: true

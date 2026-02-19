@@ -48,6 +48,10 @@
                         </select>
                     </div>
 
+                    <div class="form-group checkbox-group">
+                        <label><input type="checkbox" name="use_logit" id="use-logit"> Log-odds transform (feed logit(p_*) to meta-learner)</label>
+                    </div>
+
                     <div id="meta-features-section" style="display: none;">
                         <div class="checkbox-group">
                             <label><input type="checkbox" name="use_disagree" id="use-disagree"> Include Disagreement Features</label>
@@ -1265,6 +1269,7 @@ function loadEnsembleIntoForm(ensemble) {
     // Always load the meta-feature settings (they'll be hidden if mode is naive)
     document.getElementById('use-disagree').checked = ensemble.ensemble_use_disagree || false;
     document.getElementById('use-conf').checked = ensemble.ensemble_use_conf || false;
+    document.getElementById('use-logit').checked = ensemble.ensemble_use_logit || false;
     document.getElementById('custom-meta-features').value = (ensemble.ensemble_meta_features || []).join(', ');
 
     // Set selected base models
@@ -1279,6 +1284,7 @@ function resetForm() {
     document.getElementById('stacking-mode').value = 'naive';
     document.getElementById('use-disagree').checked = false;
     document.getElementById('use-conf').checked = false;
+    document.getElementById('use-logit').checked = false;
     document.getElementById('custom-meta-features').value = '';
     onMetaModelTypeChange();
     onStackingModeChange();
@@ -1714,6 +1720,7 @@ function gatherFormConfig() {
         ensemble_meta_features: customFeatures,
         ensemble_use_disagree: isNaive ? false : document.getElementById('use-disagree').checked,
         ensemble_use_conf: isNaive ? false : document.getElementById('use-conf').checked,
+        ensemble_use_logit: document.getElementById('use-logit').checked,
         meta_model_type: document.getElementById('meta-model-type').value,
         meta_c_value: document.getElementById('meta-c-value').value,
         model_type: document.getElementById('meta-model-type').value,

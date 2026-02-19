@@ -245,6 +245,7 @@ def create_ensemble_model(ensemble_config: dict, league=None):
         ensemble_meta_features = ensemble_config.get('ensemble_meta_features', [])
         ensemble_use_disagree = ensemble_config.get('ensemble_use_disagree', False)
         ensemble_use_conf = ensemble_config.get('ensemble_use_conf', False)
+        ensemble_use_logit = ensemble_config.get('ensemble_use_logit', False)
 
         # Determine stacking mode based on whether any meta features are requested
         use_any_meta = ensemble_use_disagree or ensemble_use_conf or len(ensemble_meta_features) > 0
@@ -252,7 +253,7 @@ def create_ensemble_model(ensemble_config: dict, league=None):
 
         print(f"Creating ensemble with {len(ensemble_models)} base models")
         print(f"Stacking mode: {stacking_mode}")
-        print(f"Use disagree: {ensemble_use_disagree}, Use conf: {ensemble_use_conf}")
+        print(f"Use disagree: {ensemble_use_disagree}, Use conf: {ensemble_use_conf}, Use logit: {ensemble_use_logit}")
         print(f"Custom meta features: {ensemble_meta_features}")
 
         # Create stacking trainer directly (no ModelerAgent needed)
@@ -277,7 +278,8 @@ def create_ensemble_model(ensemble_config: dict, league=None):
             stacking_mode=stacking_mode,
             meta_features=ensemble_meta_features,
             use_disagree=ensemble_use_disagree,
-            use_conf=ensemble_use_conf
+            use_conf=ensemble_use_conf,
+            use_logit=ensemble_use_logit,
         )
         
         if result and 'run_id' in result:
@@ -3940,20 +3942,54 @@ def generate_betting_report_endpoint(league_id=None):
         if not date_str:
             return jsonify({'success': False, 'error': 'Missing date parameter'}), 400
 
-        # Get Brier score from selected model config
+        # Get model metrics from selected model config
         config_coll = g.league.collections.get('model_config_classifier', 'nba_model_config')
         selected_config = db[config_coll].find_one({'selected': True})
         brier_score = selected_config.get('brier_score', 0.25) if selected_config else 0.25
+        log_loss_score = selected_config.get('log_loss') if selected_config else None
+
+        # Get market calibration metrics (computed by compute_market_calibration script)
+        market_brier = None
+        market_log_loss = None
+        cal_coll_name = g.league.collections.get('market_calibration')
+        if cal_coll_name:
+            # Try rolling aggregate first, then fall back to any season
+            cal_doc = db[cal_coll_name].find_one(
+                {'league_id': g.league.league_id, 'season': {'$regex': '^rolling_'}},
+                sort=[('computed_at', -1)],
+            )
+            if cal_doc:
+                market_brier = cal_doc.get('market_brier')
+                market_log_loss = cal_doc.get('market_log_loss')
+
+        # Get bin trust weights (computed by compute_bin_trust CLI script)
+        bin_trust_weights = None
+        bin_trust_coll = g.league.collections.get('bin_trust_weights')
+        if bin_trust_coll:
+            trust_doc = db[bin_trust_coll].find_one(
+                {'league_id': g.league.league_id},
+                sort=[('computed_at', -1)],
+            )
+            if trust_doc:
+                bin_trust_weights = trust_doc.get('bins', [])
 
         from bball.services.betting_report import generate_betting_report
-        recommendations = generate_betting_report(db, date_str, bankroll, brier_score, g.league, edge_threshold, force_include_game_ids)
+        recommendations = generate_betting_report(
+            db, date_str, bankroll, brier_score, g.league, edge_threshold,
+            force_include_game_ids, log_loss_score=log_loss_score,
+            market_brier=market_brier, market_log_loss=market_log_loss,
+            bin_trust_weights=bin_trust_weights,
+        )
 
         return jsonify({
             'success': True,
             'recommendations': [r.to_dict() for r in recommendations],
             'brier_score': brier_score,
+            'log_loss': log_loss_score,
             'bankroll': bankroll,
-            'edge_threshold': edge_threshold
+            'edge_threshold': edge_threshold,
+            'market_brier': market_brier,
+            'market_log_loss': market_log_loss,
         })
     except Exception as e:
         import traceback
@@ -4098,6 +4134,13 @@ def espn_db_audit_manager(league_id=None):
 def market_dashboard(league_id=None):
     """Market dashboard page."""
     return render_template('market_dashboard.html')
+
+
+@app.route('/market-bins')
+@app.route('/<league_id>/market-bins')
+def market_bins(league_id=None):
+    """Market P&L bins analysis page."""
+    return render_template('market_bins.html')
 
 
 @app.route('/<league_id>/api/points-model/configs', methods=['GET'])
@@ -4711,7 +4754,7 @@ def update_ensemble(ensemble_id, league_id=None):
         # Build update document
         update_fields = {}
         allowed_fields = ['name', 'ensemble_models', 'ensemble_type', 'ensemble_meta_features',
-                          'ensemble_use_disagree', 'ensemble_use_conf', 'stacking_mode', 'selected',
+                          'ensemble_use_disagree', 'ensemble_use_conf', 'ensemble_use_logit', 'stacking_mode', 'selected',
                           'model_type', 'best_c_value', 'meta_model_type', 'meta_c_value']
 
         for field in allowed_fields:
@@ -4808,6 +4851,7 @@ def retrain_ensemble_meta(ensemble_id, league_id=None):
         ensemble_meta_features = data.get('ensemble_meta_features', ensemble.get('ensemble_meta_features', []))
         ensemble_use_disagree = data.get('ensemble_use_disagree', ensemble.get('ensemble_use_disagree', False))
         ensemble_use_conf = data.get('ensemble_use_conf', ensemble.get('ensemble_use_conf', False))
+        ensemble_use_logit = data.get('ensemble_use_logit', ensemble.get('ensemble_use_logit', False))
         meta_model_type = data.get('meta_model_type', ensemble.get('model_type', 'LogisticRegression'))
 
         # Persist the updated flags to DB
@@ -4817,6 +4861,7 @@ def retrain_ensemble_meta(ensemble_id, league_id=None):
                 'ensemble_meta_features': ensemble_meta_features,
                 'ensemble_use_disagree': ensemble_use_disagree,
                 'ensemble_use_conf': ensemble_use_conf,
+                'ensemble_use_logit': ensemble_use_logit,
                 'model_type': meta_model_type,
             }}
         )
@@ -4828,6 +4873,7 @@ def retrain_ensemble_meta(ensemble_id, league_id=None):
             'ensemble_meta_features': ensemble_meta_features,
             'ensemble_use_disagree': ensemble_use_disagree,
             'ensemble_use_conf': ensemble_use_conf,
+            'ensemble_use_logit': ensemble_use_logit,
             'model_types': [meta_model_type],
             'c_values': [ensemble.get('best_c_value', 0.1)],
         }
@@ -4971,6 +5017,7 @@ def _run_retrain_base_job(job_id, ensemble_id, base_model_id, league_id):
             stacking_mode = ensemble_doc.get('stacking_mode', 'naive')
             use_disagree = ensemble_doc.get('ensemble_use_disagree', False)
             use_conf = ensemble_doc.get('ensemble_use_conf', False)
+            use_logit = ensemble_doc.get('ensemble_use_logit', False)
             extra_features = ensemble_doc.get('ensemble_meta_features') or None
 
             service.train_ensemble(
@@ -4981,6 +5028,7 @@ def _run_retrain_base_job(job_id, ensemble_id, base_model_id, league_id):
                 stacking_mode=stacking_mode,
                 use_disagree=use_disagree,
                 use_conf=use_conf,
+                use_logit=use_logit,
             )
 
         update_job_progress(job_id, 95, 'Finishing up...', league=league_config)
@@ -5091,6 +5139,7 @@ def create_ensemble(league_id=None):
         ensemble_meta_features = data.get('ensemble_meta_features', [])  # Custom features from user
         ensemble_use_disagree = data.get('ensemble_use_disagree', False)
         ensemble_use_conf = data.get('ensemble_use_conf', False)
+        ensemble_use_logit = data.get('ensemble_use_logit', False)
         
         if len(ensemble_models) < 2:
             return jsonify({
@@ -5187,6 +5236,7 @@ def create_ensemble(league_id=None):
             'ensemble_meta_features': ensemble_meta_features,
             'ensemble_use_disagree': ensemble_use_disagree,
             'ensemble_use_conf': ensemble_use_conf,
+            'ensemble_use_logit': ensemble_use_logit,
             'model_type': data.get('meta_model_type', 'LogisticRegression'),
             'best_c_value': float(data.get('meta_c_value', 0.1)) if data.get('meta_c_value') else None,
             'features': [],  # Ensembles don't have traditional features
@@ -5235,6 +5285,7 @@ def create_ensemble(league_id=None):
                     'ensemble_meta_features': ensemble_meta_features,
                     'ensemble_use_disagree': ensemble_use_disagree,
                     'ensemble_use_conf': ensemble_use_conf,
+                    'ensemble_use_logit': ensemble_use_logit,
                 }}
             )
             logger.info(f"Found existing ensemble {ensemble_id} with {len(ensemble_models)} base models")
@@ -5993,6 +6044,7 @@ def train_ensemble_model(config, classifier_config_collection: str = 'nba_model_
         ensemble_meta_features = config.get('ensemble_meta_features', [])
         ensemble_use_disagree = config.get('ensemble_use_disagree', False)
         ensemble_use_conf = config.get('ensemble_use_conf', False)
+        ensemble_use_logit = config.get('ensemble_use_logit', False)
         
         # Get meta-model type from selected model types (use first one)
         model_types = config.get('model_types', ['LogisticRegression'])
@@ -6005,7 +6057,7 @@ def train_ensemble_model(config, classifier_config_collection: str = 'nba_model_
         logger.info(f"Training ensemble meta-model: {meta_model_type}")
         logger.info(f"Base models: {ensemble_models}")
         logger.info(f"Meta features: {ensemble_meta_features}")
-        logger.info(f"Use disagree: {ensemble_use_disagree}, Use conf: {ensemble_use_conf}")
+        logger.info(f"Use disagree: {ensemble_use_disagree}, Use conf: {ensemble_use_conf}, Use logit: {ensemble_use_logit}")
         
         # Validate ensemble models exist
         from bson import ObjectId
@@ -6046,6 +6098,7 @@ def train_ensemble_model(config, classifier_config_collection: str = 'nba_model_
             'ensemble_meta_features': ensemble_meta_features,
             'ensemble_use_disagree': ensemble_use_disagree,
             'ensemble_use_conf': ensemble_use_conf,
+            'ensemble_use_logit': ensemble_use_logit,
             'model_type': meta_model_type,  # Store meta-model type
             'best_c_value': meta_c_value,
             'features': [],  # Ensembles don't have traditional features
@@ -6093,6 +6146,7 @@ def train_ensemble_model(config, classifier_config_collection: str = 'nba_model_
                     'ensemble_meta_features': ensemble_meta_features,
                     'ensemble_use_disagree': ensemble_use_disagree,
                     'ensemble_use_conf': ensemble_use_conf,
+                    'ensemble_use_logit': ensemble_use_logit,
                 }}
             )
         else:
@@ -6116,6 +6170,7 @@ def train_ensemble_model(config, classifier_config_collection: str = 'nba_model_
                 ensemble_meta_features,
                 ensemble_use_disagree,
                 ensemble_use_conf,
+                ensemble_use_logit,
                 time_config,
                 classifier_config_collection,
                 league
@@ -6148,6 +6203,7 @@ def run_ensemble_training_job(
     ensemble_meta_features: list,
     ensemble_use_disagree: bool,
     ensemble_use_conf: bool,
+    ensemble_use_logit: bool,
     time_config: dict,
     classifier_config_collection: str = 'nba_model_config',
     league=None
@@ -6200,7 +6256,8 @@ def run_ensemble_training_job(
             stacking_mode=stacking_mode,
             meta_features=ensemble_meta_features,
             use_disagree=ensemble_use_disagree,
-            use_conf=ensemble_use_conf
+            use_conf=ensemble_use_conf,
+            use_logit=ensemble_use_logit,
         )
         
         update_job_progress(job_id, 90, 'Finalizing ensemble model...', league=league)
@@ -7836,6 +7893,107 @@ def get_market_settlements(league_id=None):
         }), 500
 
 
+# ── In-memory cache for Kalshi portfolio data (shared across endpoints) ──
+from sportscore.market import SimpleCache
+_market_portfolio_cache = SimpleCache(default_ttl=300)
+
+
+@app.route('/<league_id>/api/market/bins', methods=['GET'])
+@app.route('/api/market/bins', methods=['GET'])
+def get_market_bins(league_id=None):
+    """Get P&L binned by implied probability for the current league's markets."""
+    import os
+    import json as json_mod
+    from bball.market.connector import MarketConnector
+    from sportscore.services.market_bins import fetch_all_fills, fetch_all_settlements, compute_market_bins
+
+    # Check for market config in league
+    market_config = getattr(g, 'league', None) and g.league.raw.get('market')
+    if not market_config:
+        return jsonify({
+            'success': False,
+            'error': 'No market configuration for this league'
+        }), 400
+
+    # Check for API credentials
+    api_key = os.environ.get('KALSHI_API_KEY')
+    private_key_dir = os.environ.get('KALSHI_PRIVATE_KEY_DIR')
+
+    if not api_key or not private_key_dir:
+        return jsonify({
+            'success': False,
+            'error': 'Kalshi API credentials not configured'
+        }), 400
+
+    # Parse query params
+    market_type = request.args.get('market_type', 'moneyline')
+    bin_mode = request.args.get('bin_mode', 'implied_prob')
+    bins_param = request.args.get('bins')
+    refresh = request.args.get('refresh') == 'true'
+
+    # Build ticker prefixes from league config
+    ticker_prefixes = []
+    if market_type in ('moneyline', 'both'):
+        series = market_config.get('series_ticker')
+        if series:
+            ticker_prefixes.append(series)
+    if market_type in ('spread', 'both'):
+        spread_series = market_config.get('spread_series_ticker')
+        if spread_series:
+            ticker_prefixes.append(spread_series)
+
+    if not ticker_prefixes:
+        return jsonify({
+            'success': False,
+            'error': 'No series ticker configured for this market type'
+        }), 400
+
+    # Parse custom bins if provided
+    custom_bins = None
+    if bins_param:
+        try:
+            custom_bins = [(b[0], b[1]) for b in json_mod.loads(bins_param)]
+        except (json_mod.JSONDecodeError, TypeError, IndexError):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid bins parameter — expected JSON array of [low, high] pairs'
+            }), 400
+
+    try:
+        connector = MarketConnector({
+            'KALSHI_API_KEY': api_key,
+            'KALSHI_PRIVATE_KEY_DIR': private_key_dir
+        })
+
+        # Fetch from cache or API
+        if refresh:
+            _market_portfolio_cache.clear()
+
+        fills = _market_portfolio_cache.get('portfolio_fills')
+        if fills is None:
+            fills = fetch_all_fills(connector)
+            _market_portfolio_cache.set('portfolio_fills', fills, ttl=300)
+
+        settlements = _market_portfolio_cache.get('portfolio_settlements')
+        if settlements is None:
+            settlements = fetch_all_settlements(connector)
+            _market_portfolio_cache.set('portfolio_settlements', settlements, ttl=300)
+
+        result = compute_market_bins(
+            fills, settlements, ticker_prefixes,
+            bins=custom_bins, bin_mode=bin_mode,
+        )
+        result['success'] = True
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Market bins error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/<league_id>/api/live-games', methods=['GET'])
 @app.route('/api/live-games', methods=['GET'])
 def get_live_games(league_id=None):
@@ -8024,56 +8182,52 @@ def get_portfolio_game_positions(league_id=None):
         series_ticker = "KXNBAGAME"
         spread_series_ticker = "KXNBASPREAD"
 
-    # Fetch raw portfolio data from Kalshi API
+    # Fetch raw portfolio data from Kalshi API (cached 60s to avoid redundant calls on polls)
+    _PORTFOLIO_TTL = 60
+
     try:
-        positions_resp = connector.get_positions(limit=200)
-        all_positions = positions_resp.get('market_positions', [])
+        all_positions = _market_portfolio_cache.get('gp_positions')
+        if all_positions is None:
+            positions_resp = connector.get_positions(limit=200)
+            all_positions = positions_resp.get('market_positions', [])
+            _market_portfolio_cache.set('gp_positions', all_positions, ttl=_PORTFOLIO_TTL)
     except Exception as e:
         logger.error(f"Failed to fetch positions: {e}")
         all_positions = []
 
     # Fetch recent fills (last 24 hours)
     try:
-        min_ts = int((datetime.now(utc).timestamp() - 86400) * 1000)
-        fills_resp = connector.get_fills(min_ts=min_ts, limit=200)
-        all_fills = fills_resp.get('fills', [])
-
-        # DEBUG: Log ALL unique tickers and event_tickers from raw Kalshi response
-        all_raw_tickers = set()
-        all_raw_event_tickers = set()
-        for f in all_fills:
-            if f.get('ticker'):
-                all_raw_tickers.add(f.get('ticker'))
-            if f.get('event_ticker'):
-                all_raw_event_tickers.add(f.get('event_ticker'))
-
-        logger.info(f"[RAW KALSHI DEBUG] Total fills from API: {len(all_fills)}")
-        logger.info(f"[RAW KALSHI DEBUG] Unique tickers: {sorted(all_raw_tickers)}")
-        logger.info(f"[RAW KALSHI DEBUG] Unique event_tickers: {sorted(all_raw_event_tickers)}")
-
-        # Check specifically for SPREAD
-        spread_tickers = [t for t in all_raw_tickers if 'SPREAD' in t.upper()]
-        spread_event_tickers = [t for t in all_raw_event_tickers if 'SPREAD' in t.upper()]
-        logger.info(f"[RAW KALSHI DEBUG] Spread tickers found: {spread_tickers}")
-        logger.info(f"[RAW KALSHI DEBUG] Spread event_tickers found: {spread_event_tickers}")
+        all_fills = _market_portfolio_cache.get('gp_fills')
+        if all_fills is None:
+            min_ts = int((datetime.now(utc).timestamp() - 86400) * 1000)
+            fills_resp = connector.get_fills(min_ts=min_ts, limit=200)
+            all_fills = fills_resp.get('fills', [])
+            _market_portfolio_cache.set('gp_fills', all_fills, ttl=_PORTFOLIO_TTL)
     except Exception as e:
         logger.error(f"Failed to fetch fills: {e}")
         all_fills = []
 
     # Fetch open orders
     try:
-        orders_resp = connector.get_orders(status='resting', limit=200)
-        all_orders = orders_resp.get('orders', [])
+        all_orders = _market_portfolio_cache.get('gp_orders')
+        if all_orders is None:
+            orders_resp = connector.get_orders(status='resting', limit=200)
+            all_orders = orders_resp.get('orders', [])
+            _market_portfolio_cache.set('gp_orders', all_orders, ttl=_PORTFOLIO_TTL)
     except Exception as e:
         logger.error(f"Failed to fetch orders: {e}")
         all_orders = []
 
     # Fetch settlements for this date range to determine won/lost
     try:
-        # Get settlements from yesterday through tomorrow to catch all relevant games
-        min_ts = int((datetime.combine(game_date, datetime.min.time()).timestamp() - 86400) * 1000)
-        settlements_resp = connector.get_settlements(min_ts=min_ts, limit=200)
-        all_settlements = settlements_resp.get('settlements', [])
+        cache_key = f'gp_settlements:{date_str}'
+        all_settlements = _market_portfolio_cache.get(cache_key)
+        if all_settlements is None:
+            # Get settlements from yesterday through tomorrow to catch all relevant games
+            min_ts = int((datetime.combine(game_date, datetime.min.time()).timestamp() - 86400) * 1000)
+            settlements_resp = connector.get_settlements(min_ts=min_ts, limit=200)
+            all_settlements = settlements_resp.get('settlements', [])
+            _market_portfolio_cache.set(cache_key, all_settlements, ttl=_PORTFOLIO_TTL)
     except Exception as e:
         logger.error(f"Failed to fetch settlements: {e}")
         all_settlements = []

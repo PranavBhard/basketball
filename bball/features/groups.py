@@ -94,7 +94,7 @@ class FeatureGroups:
             "description": "Injury impact features (severity, minutes lost, star impact, normalized shares)",
             "stats": [
                 # Legacy injury features
-                "inj_impact", "inj_severity", "inj_min_lost", "inj_per", "inj_rotation_per",
+                "inj_impact", "inj_severity", "inj_min_lost", "inj_per", "inj_rotation_per", "inj_rotation_share",
                 "inj_per_share", "inj_per_weighted_share",
                 # New star-based injury features (see documentation/player_feature_updates.md)
                 "inj_star_share",        # Injured star's share of top-3 star mass
@@ -406,6 +406,9 @@ class FeatureGroups:
         'inj_rotation_per|none|raw|away',
         'inj_rotation_per|none|raw|diff',
         'inj_rotation_per|none|raw|home',
+        'inj_rotation_share|none|raw|away',
+        'inj_rotation_share|none|raw|diff',
+        'inj_rotation_share|none|raw|home',
         'inj_severity|none|raw|away',
         'inj_severity|none|raw|diff',
         'inj_severity|none|raw|home',
@@ -420,9 +423,9 @@ class FeatureGroups:
         'inj_star_score_share|none|top3_sum|away',
         'inj_star_score_share|none|top3_sum|diff',
         'inj_star_score_share|none|top3_sum|home',
-        'inj_top1_star_out|none|raw|away',
-        'inj_top1_star_out|none|raw|diff',
-        'inj_top1_star_out|none|raw|home',
+        'inj_top1_star_out|none|binary|away',
+        'inj_top1_star_out|none|binary|diff',
+        'inj_top1_star_out|none|binary|home',
     ]
 
     @classmethod

@@ -115,6 +115,11 @@ class SharedFeatureGenerator:
             venue_cache=context.venue_cache,
         )
 
+        # Inject Elo cache (matches training path in shared_context.py)
+        if hasattr(context, 'elo_cache') and context.elo_cache is not None:
+            self._computer._elo_cache = context.elo_cache
+            print(f"[SharedFeatureGenerator] Injected elo_cache into BasketballFeatureComputer")
+
         # Inject into InjuryFeatureCalculator
         if self._injury_calculator:
             self._injury_calculator.set_preloaded_data(context.games_home, context.games_away)

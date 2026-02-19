@@ -1,0 +1,188 @@
+meta:
+  league_id: wnba
+  display_name: WNBA
+  sport: basketball
+  logo_url: /static/imgs/wnba-logo.png
+
+mongo:
+  collections:
+    games: wnba_games
+    player_stats: wnba_player_stats
+    players: wnba_players
+    teams: wnba_teams
+    venues: wnba_venues
+    rosters: wnba_rosters
+
+    model_config_classifier: wnba_model_config
+    model_config_points: wnba_model_config_points
+    model_predictions: wnba_model_predictions
+    experiment_runs: wnba_experiment_runs
+
+    master_training_metadata: wnba_master_training_metadata
+
+    cached_league_stats: wnba_cached_league_stats
+    elo_cache: wnba_elo_cache
+    jobs: wnba_jobs
+
+paths:
+  master_training_csv: master_training/MASTER_TRAINING_WNBA.csv
+
+espn:
+  base_url_web: https://site.web.api.espn.com
+  base_url_site: https://site.api.espn.com
+
+  league_slug: wnba
+  sport_path: wnba
+
+  endpoints:
+    scoreboard_header_template: "{base_url_web}/apis/personalized/v2/scoreboard/header?sport=basketball&league={league_slug}&region=us&lang=en&contentorigin=espn&dates={YYYYMMDD}&tz=America%2FNew_York"
+    scoreboard_site_template: "{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/scoreboard?dates={YYYYMMDD}"
+    game_summary_template: "{base_url_web}/apis/site/v2/sports/basketball/{sport_path}/summary?region=us&lang=en&contentorigin=espn&event={game_id}"
+    teams_template: "{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/teams"
+    roster_template: "{base_url_site}/apis/site/v2/sports/basketball/{sport_path}/teams/{team_id}/roster"
+
+  examples:
+    scoreboard_header_example: cli/structure_examples/espn_resp_example.md
+
+elo:
+  starting_rating: 1500
+  scale: 400
+
+  home_advantage: 65
+  neutral_site_home_advantage: 0
+
+  strategy: dynamic
+  k_schedule:
+    - {max_games: 12, k: 24}
+    - {max_games: 24, k: 18}
+    - {default: 14}
+
+  use_margin: true
+  margin_multiplier:
+    type: mov_log
+    cap: 15
+    scale: 2.0
+
+  postseason:
+    enabled: true
+    home_advantage: 60
+    k_multiplier: 0.85
+
+  neutral_site:
+    enabled: true
+    home_advantage: 0
+
+  offseason_regression:
+    enabled: true
+    carryover_weight: 0.80
+    to_mean_weight: 0.20
+
+player_filters:
+  mpg_thresh: 10
+  rotation_size: 9
+  gp_ratio: 0.25
+  gp_floor_early: 3
+  gp_floor_late: 8
+  gp_floor_phase_games: 16
+  min_team_games_for_filter: 4
+  use_or_rule: true
+
+training:
+  min_games_played: 10
+  team_string_columns: [Home, Away]
+
+season:
+  timezone: America/New_York
+  # WNBA plays May–October; season rolls over in the calendar year gap (Jan–Apr).
+  season_cutover_month: 2
+  exclude_game_types:
+    - preseason
+    - allstar
+  game_type_map:
+    1: preseason
+    2: regseason
+    3: playoffs
+    5: playin
+  playin_text_override: false
+
+teams:
+  team_id_map_file: leagues/team_id_maps/wnba_espn_team_id_to_abbrev.json
+  # WNBA has few enough teams that abbreviations are unique
+  primary_identifier: name
+  include_team_id: false
+
+news_sources:
+  espn:
+    base_url: https://www.espn.com/wnba/
+    sport_path: wnba
+    content_types: [news, stats, scores, injuries, schedule, boxscore]
+
+    patterns:
+      team: /{sport_path}/team/_/name/{team_code}
+      team_news: /{sport_path}/team/news/_/name/{team_code}
+      team_schedule: /{sport_path}/team/schedule/_/name/{team_code}
+      team_roster: /{sport_path}/team/roster/_/name/{team_code}
+      team_stats: /{sport_path}/team/stats/_/name/{team_code}
+      player: /{sport_path}/player/_/id/{player_id}/{player_slug}
+      player_news: /{sport_path}/player/news/_/id/{player_id}
+      player_stats: /{sport_path}/player/stats/_/id/{player_id}
+      player_gamelog: /{sport_path}/player/gamelog/_/id/{player_id}
+      player_bio: /{sport_path}/player/bio/_/id/{player_id}
+      game: /{sport_path}/game/_/gameId/{game_id}
+      game_boxscore: /{sport_path}/boxscore/_/gameId/{game_id}
+      game_playbyplay: /{sport_path}/playbyplay/_/gameId/{game_id}
+      game_recap: /{sport_path}/recap/_/gameId/{game_id}
+
+    mappings:
+      team_codes:
+        ATL: atl
+        CHI: chi
+        CON: con
+        DAL: dal
+        GS: gs
+        IND: ind
+        LV: lv
+        LA: la
+        MIN: min
+        NY: ny
+        PHX: phx
+        SEA: sea
+        WSH: wsh
+      player_ids_file: leagues/id_maps/wnba_espn_player_ids.json
+      game_id_field: game_id
+
+pipeline:
+  min_season: "2020"
+  # WNBA season runs May–October
+  season_start_month: 5
+  season_start_day: 1
+  season_end_month: 10
+  season_end_day: 31
+
+pipelines:
+  full:
+    steps:
+      - espn_pull:
+          parallel: true
+          max_workers: 4
+      - post_processing:
+          refresh_venues: true
+          refresh_players: true
+          build_rosters: true
+          compute_injuries: true
+      - cache_elo: true
+      - generate_training:
+          workers: 32
+          chunk_size: 500
+          include_player_features: true
+      - register_csv: true
+
+  training:
+    workers: 32
+    chunk_size: 500
+    include_player_features: true
+    preload:
+      games: true
+      venues: true
+      per_cache: true
+      injury_cache: true

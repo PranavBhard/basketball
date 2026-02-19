@@ -579,6 +579,7 @@ def _process_game(
         'season_type_name': season_type_name,
         'season_type_abbrev': season_type_abbrev,
         'isTournament': is_tournament,
+        'neutralSite': bool(competitions0.get('neutralSite', False)),
         'description': (header.get('name') or header.get('shortName') or 'Regular Season'),
         'homeWon': home_score > away_score,
         'OT': False,
@@ -1695,3 +1696,166 @@ def refresh_team_conferences(
     print(f"  {'[DRY RUN] ' if dry_run else ''}Found {conf_count} conferences, updated {updated} teams")
 
     return {'success': True, 'updated': updated, 'conferences': conf_count}
+
+
+def _fetch_scoreboard_with_retry(espn_client, game_date, max_retries=3, base_timeout=60):
+    """Fetch scoreboard with retry + exponential backoff for heavy dates (CBB)."""
+    for attempt in range(max_retries):
+        try:
+            # Build URL manually with longer timeout
+            date_str = game_date.strftime('%Y%m%d')
+            url = espn_client._url("scoreboard_site_template", YYYYMMDD=date_str)
+            timeout = base_timeout * (attempt + 1)
+            response = requests.get(url, headers=espn_client.headers, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** (attempt + 1)
+                time.sleep(wait)
+            else:
+                print(f"  Failed after {max_retries} retries for {game_date}: {e}")
+                return None
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code in (502, 503, 504):
+                if attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    time.sleep(wait)
+                else:
+                    print(f"  Failed after {max_retries} retries for {game_date}: {e}")
+                    return None
+            else:
+                print(f"  HTTP error for {game_date}: {e}")
+                return None
+        except requests.RequestException as e:
+            print(f"  Request error for {game_date}: {e}")
+            return None
+    return None
+
+
+def backfill_field_from_scoreboard(
+    db,
+    league_config: "LeagueConfig",
+    field_name: str,
+    extractor=None,
+    seasons: Optional[List[str]] = None,
+    only_missing: bool = False,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Backfill a field on existing game documents from ESPN scoreboard API.
+
+    Uses the scoreboard (one API call per date) instead of game summaries
+    (one call per game), so it's efficient for bulk backfill. Includes retry
+    with exponential backoff for heavy dates (CBB can have 100+ games/day).
+
+    Args:
+        db: MongoDB database instance
+        league_config: League configuration
+        field_name: Field name to set on game documents
+        extractor: Optional callable(competition_dict) -> value.
+                   If None, uses competition.get(field_name).
+        seasons: Optional list of seasons to filter (e.g., ['2024-2025']).
+                 If None, backfills all games.
+        only_missing: If True, only backfill games that don't already have
+                      the field. Useful for resuming interrupted backfills.
+        dry_run: Preview without database changes
+
+    Returns:
+        Dict with {dates_processed, games_updated, games_skipped, errors}
+
+    Usage:
+        # Backfill neutralSite for all games
+        backfill_field_from_scoreboard(db, league, 'neutralSite')
+
+        # Backfill for specific seasons
+        backfill_field_from_scoreboard(db, league, 'neutralSite', seasons=['2024-2025'])
+
+        # Custom extractor
+        backfill_field_from_scoreboard(db, league, 'conferenceCompetition',
+            extractor=lambda comp: bool(comp.get('conferenceCompetition', False)))
+    """
+    from bball.data.league_db_proxy import LeagueDbProxy
+    league_db = LeagueDbProxy(db, league_config)
+
+    if extractor is None:
+        extractor = lambda comp: comp.get(field_name)
+
+    # Get distinct dates from games collection
+    query = {}
+    if seasons:
+        query['season'] = {'$in': seasons}
+    if only_missing:
+        query[field_name] = {'$exists': False}
+
+    dates_cursor = league_db.stats_nba.distinct('date', query)
+    all_dates = sorted(set(d for d in dates_cursor if d))
+
+    print(f"Backfilling '{field_name}' for {len(all_dates)} dates"
+          f"{f' (seasons: {seasons})' if seasons else ''}"
+          f"{' [DRY RUN]' if dry_run else ''}...")
+
+    espn_client = ESPNClient(league=league_config)
+    dates_processed = 0
+    games_updated = 0
+    games_skipped = 0
+    errors = []
+
+    for date_str in all_dates:
+        try:
+            game_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            errors.append(f"Invalid date: {date_str}")
+            continue
+
+        scoreboard = _fetch_scoreboard_with_retry(espn_client, game_date)
+        if not scoreboard:
+            errors.append(f"No scoreboard for {date_str}")
+            continue
+
+        # Build game_id -> extracted value from scoreboard
+        values_by_game = {}
+        for event in scoreboard.get('events', []):
+            game_id = event.get('id')
+            if not game_id:
+                continue
+            competitions = event.get('competitions', [])
+            if not competitions:
+                continue
+            value = extractor(competitions[0])
+            if value is not None:
+                values_by_game[str(game_id)] = value
+
+        # Get game_ids in our DB for this date
+        date_query = {'date': date_str}
+        if only_missing:
+            date_query[field_name] = {'$exists': False}
+        db_games = league_db.stats_nba.find(date_query, {'game_id': 1})
+
+        for doc in db_games:
+            gid = str(doc.get('game_id'))
+            if gid in values_by_game:
+                if not dry_run:
+                    league_db.stats_nba.update_one(
+                        {'game_id': gid},
+                        {'$set': {field_name: values_by_game[gid]}}
+                    )
+                games_updated += 1
+            else:
+                games_skipped += 1
+
+        dates_processed += 1
+        if dates_processed % 50 == 0:
+            print(f"  Progress: {dates_processed}/{len(all_dates)} dates, "
+                  f"{games_updated} games updated")
+
+    print(f"{'[DRY RUN] ' if dry_run else ''}Done: {dates_processed} dates, "
+          f"{games_updated} games updated, {games_skipped} skipped, "
+          f"{len(errors)} errors")
+
+    return {
+        'dates_processed': dates_processed,
+        'games_updated': games_updated,
+        'games_skipped': games_skipped,
+        'errors': errors,
+    }

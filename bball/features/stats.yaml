@@ -461,7 +461,7 @@ stats:
     type: custom
     handler: compute_elo
     valid_calc_weights: [raw]
-    valid_time_periods: [none, season]
+    valid_time_periods: [none]
 
   inj_impact:
     category: special
@@ -513,6 +513,14 @@ stats:
     handler: compute_injury
     valid_calc_weights: [raw]
 
+  inj_rotation_share:
+    category: special
+    description: "Fraction of rotation players injured: injured_rotation_count / total_rotation_count"
+    type: custom
+    handler: compute_injury
+    valid_calc_weights: [raw]
+    valid_time_periods: [none]
+
   inj_star_share:
     category: special
     description: "Injured star's share of top-3 star mass (0 if star not out): star_score(STAR) / sum(top3 star_scores)"
@@ -534,7 +542,7 @@ stats:
     description: "Binary: is top-1 usage star injured? 1.0 if top1({USAGE_PLAYERS}) in {INJ_PLAYERS} else 0.0"
     type: custom
     handler: compute_injury
-    valid_calc_weights: [raw]
+    valid_calc_weights: [binary]
     valid_time_periods: [none]
 
   player_team_per:
@@ -600,8 +608,24 @@ stats:
     description: "Minute-weighted PER for rotation players ({ROTATION} = top active by MPG, max 10)"
     type: custom
     handler: compute_player
-    valid_calc_weights: [weighted_MIN_REC, weighted_MIN_REC(k=20), weighted_MIN_REC(k=25), weighted_MIN_REC(k=30), weighted_MIN_REC(k=35), weighted_MPG]
-    valid_time_periods: [season]
+    valid_calc_weights: [std, weighted_MIN_REC, weighted_MIN_REC(k=20), weighted_MIN_REC(k=25), weighted_MIN_REC(k=30), weighted_MIN_REC(k=35), weighted_MPG]
+    valid_time_periods: [games_5, games_10, season]
+
+  player_star_per:
+    category: special
+    description: "Per-game minute-weighted PER std for top 3 players by minutes in each game"
+    type: custom
+    handler: compute_player
+    valid_calc_weights: [std]
+    valid_time_periods: [games_5, games_10]
+
+  player_rotation_minutes:
+    category: special
+    description: "Average per-player minutes std across rotation (lineup stability metric)"
+    type: custom
+    handler: compute_player
+    valid_calc_weights: [std]
+    valid_time_periods: [games_5, games_10]
 
   player_starter_bench_per_gap:
     category: special

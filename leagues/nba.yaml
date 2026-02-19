@@ -24,6 +24,8 @@ mongo:
     cached_league_stats: nba_cached_league_stats
     elo_cache: nba_elo_cache
     jobs: nba_jobs
+    market_calibration: nba_market_calibration
+    bin_trust_weights: nba_bin_trust_weights
 
 paths:
   # Keep existing default master training location (parent/master_training/MASTER_TRAINING.csv).
@@ -68,6 +70,16 @@ elo:
   #   - {default: 12}
   # home_advantage_overrides:
   #   playoffs: 80
+
+player_filters:
+  mpg_thresh: 10
+  rotation_size: 10
+  gp_ratio: 0.20
+  gp_floor_early: 5
+  gp_floor_late: 12
+  gp_floor_phase_games: 25
+  min_team_games_for_filter: 6
+  use_or_rule: true
 
 training:
   min_games_played: 20
@@ -768,6 +780,9 @@ pipelines:
       - espn_pull:
           parallel: true
           max_workers: 4
+      - odds_backfill:
+          max_workers: 4
+          min_season: "2024-2025"
       - post_processing:
           refresh_venues: true
           refresh_players: true

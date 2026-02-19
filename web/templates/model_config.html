@@ -191,6 +191,10 @@
                             <input type="checkbox" id="ensemble-use-conf" class="ensemble-meta-checkbox" style="cursor: pointer;">
                             <span style="font-size: 0.9em;">Include Confidence Features (conf_*)</span>
                         </label>
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="ensemble-use-logit" class="ensemble-meta-checkbox" style="cursor: pointer;">
+                            <span style="font-size: 0.9em;">Log-odds Transform (feed logit(p_*) to meta-learner)</span>
+                        </label>
                     </div>
 
                     <!-- Custom Features -->
@@ -1473,6 +1477,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Ensemble meta feature listeners
     document.getElementById('ensemble-use-disagree').addEventListener('change', updateEnsembleMetaSummary);
     document.getElementById('ensemble-use-conf').addEventListener('change', updateEnsembleMetaSummary);
+    document.getElementById('ensemble-use-logit').addEventListener('change', updateEnsembleMetaSummary);
     document.getElementById('ensemble-custom-features').addEventListener('input', updateEnsembleMetaSummary);
 
     // Event delegation for dynamically created ensemble checkboxes
@@ -1839,6 +1844,7 @@ function getFormData() {
             ensemble_meta_features: selectedConfig.ensemble_meta_features || [],
             ensemble_use_disagree: selectedConfig.ensemble_use_disagree || false,
             ensemble_use_conf: selectedConfig.ensemble_use_conf || false,
+            ensemble_use_logit: selectedConfig.ensemble_use_logit || false,
             // Include time calibration settings from ensemble config
             use_time_calibration: selectedConfig.use_time_calibration || false,
             calibration_method: selectedConfig.calibration_method || 'isotonic',
@@ -2273,6 +2279,7 @@ async function runConfig() {
             ensemble_meta_features: config.ensemble_meta_features,
             ensemble_use_disagree: config.ensemble_use_disagree,
             ensemble_use_conf: config.ensemble_use_conf,
+            ensemble_use_logit: config.ensemble_use_logit,
             use_time_calibration: config.use_time_calibration,
             calibration_method: config.calibration_method,
             begin_year: config.begin_year,
@@ -3838,7 +3845,8 @@ function createEnsemble() {
             ensemble_type: 'stacking',
             ensemble_meta_features: ensembleMetaFeatures.custom_features,
             ensemble_use_disagree: ensembleMetaFeatures.use_disagree,
-            ensemble_use_conf: ensembleMetaFeatures.use_conf
+            ensemble_use_conf: ensembleMetaFeatures.use_conf,
+            ensemble_use_logit: ensembleMetaFeatures.use_logit
         })
     })
     .then(response => response.json())
@@ -3869,6 +3877,7 @@ function createEnsemble() {
 function collectEnsembleMetaFeatures() {
     const useDisagree = document.getElementById('ensemble-use-disagree').checked;
     const useConf = document.getElementById('ensemble-use-conf').checked;
+    const useLogit = document.getElementById('ensemble-use-logit').checked;
     const customFeaturesText = document.getElementById('ensemble-custom-features').value.trim();
 
     // Parse custom features (comma-separated)
@@ -3880,6 +3889,7 @@ function collectEnsembleMetaFeatures() {
     return {
         use_disagree: useDisagree,
         use_conf: useConf,
+        use_logit: useLogit,
         custom_features: customFeatures
     };
 }
@@ -3893,6 +3903,9 @@ function updateEnsembleMetaSummary() {
     }
     if (metaFeatures.use_conf) {
         summaryText.push('Confidence features (conf_*)');
+    }
+    if (metaFeatures.use_logit) {
+        summaryText.push('Log-odds transform (p_* → logit)');
     }
     if (metaFeatures.custom_features.length > 0) {
         summaryText.push('Custom: ' + metaFeatures.custom_features.join(', '));
@@ -3934,6 +3947,11 @@ function formatEnsembleMetaFeatures(config) {
         parts.push('conf_*');
     }
 
+    // Log-odds transform: p_* shown as log-odds when enabled
+    if (config.ensemble_use_logit) {
+        parts.push('logit(p_*)');
+    }
+
     // Check for custom features
     if (config.ensemble_meta_features && config.ensemble_meta_features.length > 0) {
         parts.push(config.ensemble_meta_features.join(', '));
@@ -3961,6 +3979,7 @@ function showEditEnsembleModal(ensembleId) {
     // Pre-populate the form
     document.getElementById('edit-ensemble-use-disagree').checked = config.ensemble_use_disagree || false;
     document.getElementById('edit-ensemble-use-conf').checked = config.ensemble_use_conf || false;
+    document.getElementById('edit-ensemble-use-logit').checked = config.ensemble_use_logit || false;
     document.getElementById('edit-ensemble-custom-features').value =
         (config.ensemble_meta_features || []).join(', ');
 
@@ -3982,12 +4001,14 @@ function closeEditEnsembleModal() {
 function updateEditEnsembleMetaSummary() {
     const useDisagree = document.getElementById('edit-ensemble-use-disagree').checked;
     const useConf = document.getElementById('edit-ensemble-use-conf').checked;
+    const useLogit = document.getElementById('edit-ensemble-use-logit').checked;
     const customText = document.getElementById('edit-ensemble-custom-features').value.trim();
     const customFeatures = customText.split(',').map(f => f.trim()).filter(f => f.length > 0);
 
     const parts = [];
     if (useDisagree) parts.push('Disagreement (disagree_*)');
     if (useConf) parts.push('Confidence (conf_*)');
+    if (useLogit) parts.push('Log-odds transform (p_* → logit)');
     if (customFeatures.length > 0) parts.push('Custom: ' + customFeatures.join(', '));
 
     const summaryEl = document.getElementById('edit-ensemble-meta-summary-text');
@@ -4002,6 +4023,7 @@ async function submitEditEnsemble() {
 
     const useDisagree = document.getElementById('edit-ensemble-use-disagree').checked;
     const useConf = document.getElementById('edit-ensemble-use-conf').checked;
+    const useLogit = document.getElementById('edit-ensemble-use-logit').checked;
     const customText = document.getElementById('edit-ensemble-custom-features').value.trim();
     const customFeatures = customText.split(',').map(f => f.trim()).filter(f => f.length > 0);
     const metaModelType = document.getElementById('edit-ensemble-meta-model-type').value;
@@ -4019,6 +4041,7 @@ async function submitEditEnsemble() {
                 ensemble_meta_features: customFeatures,
                 ensemble_use_disagree: useDisagree,
                 ensemble_use_conf: useConf,
+                ensemble_use_logit: useLogit,
                 meta_model_type: metaModelType
             })
         });
@@ -4086,6 +4109,10 @@ async function submitEditEnsemble() {
                         <input type="checkbox" id="edit-ensemble-use-conf" onchange="updateEditEnsembleMetaSummary()">
                         <span>Include Confidence Features (conf_*)</span>
                     </label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="edit-ensemble-use-logit" onchange="updateEditEnsembleMetaSummary()">
+                        <span>Log-odds Transform (feed logit(p_*) to meta-learner)</span>
+                    </label>
                 </div>
             </div>
 
@@ -4093,7 +4120,7 @@ async function submitEditEnsemble() {
             <div style="margin-bottom: 15px;">
                 <label style="font-weight: 500; display: block; margin-bottom: 6px;">Custom Features (comma-separated):</label>
                 <input type="text" id="edit-ensemble-custom-features"
-                       placeholder="e.g., pred_margin, elo|season|rating|diff"
+                       placeholder="e.g., pred_margin, elo|none|raw|diff"
                        oninput="updateEditEnsembleMetaSummary()"
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
                 <span style="font-size: 0.85em; color: #888;">Common: pred_margin (requires points model predictions in master CSV)</span>

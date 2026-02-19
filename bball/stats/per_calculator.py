@@ -53,12 +53,41 @@ CACHED_PER_COLLECTION = 'cached_per_features'
 # PLAYER SUBSET CONSTANTS (from documentation/player_feature_updates.md)
 # =============================================================================
 # These constants define how player subsets are filtered for feature calculations
+# Kept as module-level defaults for backward compatibility; prefer
+# get_player_filter_constants(league) for league-aware thresholds.
 
 MPG_THRESH = 10        # Minimum minutes per game to be considered "rotation" quality
 GP_FLOOR = 10          # Minimum games played threshold floor
 GP_RATIO = 0.15        # Games played threshold as ratio of team games
 ROTATION_SIZE = 10     # Maximum players in rotation subset
 EPS = 1e-6            # Small constant to avoid division by zero
+
+
+def get_player_filter_constants(league=None):
+    """Read player filter thresholds from league config, with defaults.
+
+    Returns the base constants used by PERCalculator for player_ features.
+    Injury features use InjuryFeatureCalculator._get_usage_thresholds() instead,
+    which supports phase-aware GP and OR-rule eligibility.
+    """
+    pf = {}
+    if league:
+        pf = league.raw.get("player_filters", {})
+    return {
+        "mpg_thresh": pf.get("mpg_thresh", MPG_THRESH),
+        "gp_floor": pf.get("gp_floor_late", GP_FLOOR),
+        "gp_ratio": pf.get("gp_ratio_late", pf.get("gp_ratio", GP_RATIO)),
+        "rotation_size": pf.get("rotation_size", ROTATION_SIZE),
+    }
+
+
+def _std(values):
+    """Sample standard deviation (n-1 denominator)."""
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
+    return variance ** 0.5
 
 
 class PERCalculator:
@@ -1231,6 +1260,250 @@ class PERCalculator:
 
         return weighted_sum / (total_weight + EPS) if total_weight > 0 else 0.0
 
+    def _compute_per_game_team_values(
+        self,
+        team: str,
+        season: str,
+        before_date: str,
+        n_games: int,
+        player_filter_ids: Optional[set] = None,
+        top_n_by_minutes: Optional[int] = None,
+    ) -> list:
+        """
+        For each of the last N team games, compute minute-weighted PER from box scores.
+
+        Args:
+            team: Team name
+            season: Season string
+            before_date: Date string (YYYY-MM-DD)
+            n_games: Number of recent games to look at
+            player_filter_ids: If set, only include these player IDs (prediction mode).
+                               If None, use all players who played in each game (training mode).
+            top_n_by_minutes: If set, only use top N players by minutes per game (star subset).
+
+        Returns:
+            List of minute-weighted PER values, one per qualifying game.
+        """
+        if not self._preloaded:
+            return []
+
+        # Get league constants and lg_aper (same caching pattern as _compute_subset_recency_weighted_per)
+        league_constants = get_league_constants(season, self.db, league=self.league)
+        if not league_constants:
+            return []
+        lg_pace = league_constants.get('lg_pace', 95)
+
+        if season in self._lg_aper_by_season:
+            lg_aper = self._lg_aper_by_season[season]
+        else:
+            cached_stats = get_season_stats_with_fallback(season, self.db, league=self.league)
+            if cached_stats and 'lg_aper' in cached_stats:
+                lg_aper = cached_stats['lg_aper']
+                self._lg_aper_by_season[season] = lg_aper
+            else:
+                lg_aper = self.compute_league_average_aper(season, None)
+                self._lg_aper_by_season[season] = lg_aper
+        use_normalization = lg_aper > 0
+
+        team_pace = get_team_pace(season, team, self.db, league=self.league)
+        if team_pace == 0:
+            team_pace = lg_pace
+
+        # Build game_id -> team_data lookup
+        key = (team, season)
+        game_team_data = {}
+        if key in self._team_stats_cache:
+            for tg in self._team_stats_cache[key]:
+                game_team_data[tg['game_id']] = tg['team_data']
+
+        # Get last N team games before before_date (sorted desc by date)
+        team_games = self._team_stats_cache.get(key, [])
+        recent_games = [
+            tg for tg in team_games
+            if tg['date'] < before_date
+        ]
+        # Already sorted asc by date from preload; take last N
+        recent_games = recent_games[-n_games:]
+        recent_game_ids = {tg['game_id'] for tg in recent_games}
+
+        if not recent_game_ids:
+            return []
+
+        # Group player-game records by game_id
+        player_records = self._player_stats_cache.get(key, [])
+        games_players = defaultdict(list)
+        for pg in player_records:
+            gid = pg.get('game_id')
+            if gid not in recent_game_ids:
+                continue
+            stats = pg.get('stats', {})
+            if stats.get('min', 0) <= 0:
+                continue
+            pid = str(pg.get('player_id'))
+            if player_filter_ids is not None and pid not in player_filter_ids:
+                continue
+            games_players[gid].append(pg)
+
+        # For each game, compute minute-weighted PER
+        result = []
+        for tg in recent_games:
+            gid = tg['game_id']
+            players_in_game = games_players.get(gid, [])
+            if not players_in_game:
+                continue
+
+            # If star subset, take top N by minutes
+            if top_n_by_minutes:
+                players_in_game = sorted(
+                    players_in_game,
+                    key=lambda p: p.get('stats', {}).get('min', 0),
+                    reverse=True
+                )[:top_n_by_minutes]
+
+            team_data = game_team_data.get(gid)
+            if not team_data:
+                continue
+
+            team_stats = {
+                'assists': team_data.get('assists', 1),
+                'FG_made': team_data.get('FG_made', 1)
+            }
+
+            weighted_per_sum = 0.0
+            total_min = 0.0
+            for pg in players_in_game:
+                stats = pg.get('stats', {})
+                min_g = stats.get('min', 0)
+                if min_g <= 0:
+                    continue
+
+                player_game_stats = {
+                    'min': min_g,
+                    'pts': stats.get('pts', 0),
+                    'fg_made': stats.get('fg_made', 0),
+                    'fg_att': stats.get('fg_att', 0),
+                    'three_made': stats.get('three_made', 0),
+                    'ft_made': stats.get('ft_made', 0),
+                    'ft_att': stats.get('ft_att', 0),
+                    'reb': stats.get('reb', 0),
+                    'oreb': stats.get('oreb', 0),
+                    'ast': stats.get('ast', 0),
+                    'stl': stats.get('stl', 0),
+                    'blk': stats.get('blk', 0),
+                    'to': stats.get('to', 0),
+                    'pf': stats.get('pf', 0)
+                }
+
+                uper = self.compute_uper(player_game_stats, team_stats, league_constants)
+                aper = self.compute_aper(uper, team_pace, lg_pace)
+                per_g = self.compute_per(aper, lg_aper) if use_normalization else aper
+
+                weighted_per_sum += per_g * min_g
+                total_min += min_g
+
+            if total_min > 0:
+                result.append(weighted_per_sum / total_min)
+
+        return result
+
+    def _compute_per_player_minutes_std(
+        self,
+        team: str,
+        season: str,
+        before_date: str,
+        n_games: int,
+        player_filter_ids: Optional[set] = None,
+    ) -> float:
+        """
+        Compute average per-player minutes std across a game window (lineup stability).
+
+        For each player who appeared in any of the last N games, build their minutes
+        series (0 for games they didn't play), compute std, then average across players.
+
+        Args:
+            team: Team name
+            season: Season string
+            before_date: Date string (YYYY-MM-DD)
+            n_games: Number of recent games
+            player_filter_ids: If set, only include these player IDs (prediction mode).
+
+        Returns:
+            Average of per-player minutes stds (0.0 if no players).
+        """
+        if not self._preloaded:
+            return 0.0
+
+        key = (team, season)
+
+        # Get last N team game IDs
+        team_games = self._team_stats_cache.get(key, [])
+        recent_games = [tg for tg in team_games if tg['date'] < before_date]
+        recent_games = recent_games[-n_games:]
+        if not recent_games:
+            return 0.0
+
+        recent_game_ids = [tg['game_id'] for tg in recent_games]
+        game_id_set = set(recent_game_ids)
+
+        # Build {player_id: {game_id: minutes}} from player records
+        player_records = self._player_stats_cache.get(key, [])
+        player_minutes = defaultdict(dict)  # {pid: {gid: min}}
+        for pg in player_records:
+            gid = pg.get('game_id')
+            if gid not in game_id_set:
+                continue
+            stats = pg.get('stats', {})
+            min_g = stats.get('min', 0)
+            if min_g <= 0:
+                continue
+            pid = str(pg.get('player_id'))
+            if player_filter_ids is not None and pid not in player_filter_ids:
+                continue
+            player_minutes[pid][gid] = min_g
+
+        if not player_minutes:
+            return 0.0
+
+        # For each player, build minutes series (0 for games not played) and compute std
+        stds = []
+        for pid, gid_min_map in player_minutes.items():
+            series = [gid_min_map.get(gid, 0.0) for gid in recent_game_ids]
+            stds.append(_std(series))
+
+        return sum(stds) / len(stds) if stds else 0.0
+
+    def _compute_per_std_features(
+        self,
+        team: str,
+        season: str,
+        before_date: str,
+        player_filter_ids: Optional[set] = None,
+    ) -> dict:
+        """
+        Compute per-game volatility features for rotation PER, star PER, and minutes.
+
+        Returns dict with 6 keys:
+            player_rotation_per_std_games_{5,10}
+            player_star_per_std_games_{5,10}
+            player_rotation_minutes_std_games_{5,10}
+        """
+        result = {}
+        for n in [5, 10]:
+            rotation_values = self._compute_per_game_team_values(
+                team, season, before_date, n, player_filter_ids
+            )
+            result[f'player_rotation_per_std_games_{n}'] = _std(rotation_values)
+
+            star_values = self._compute_per_game_team_values(
+                team, season, before_date, n, player_filter_ids, top_n_by_minutes=3
+            )
+            result[f'player_star_per_std_games_{n}'] = _std(star_values)
+
+            result[f'player_rotation_minutes_std_games_{n}'] = self._compute_per_player_minutes_std(
+                team, season, before_date, n, player_filter_ids
+            )
+        return result
+
     def _compute_subset_recency_weighted_per(
         self,
         player_ids: list,
@@ -1591,6 +1864,11 @@ class PERCalculator:
             result[f'player_star_score_top3_MIN_REC_k{k}'] = 0.0
             result[f'player_star_share_top1_share_MIN_REC_k{k}'] = 0.0
             result[f'player_star_share_top3_share_MIN_REC_k{k}'] = 0.0
+        # Per-game volatility features (std)
+        for n in [5, 10]:
+            result[f'player_rotation_per_std_games_{n}'] = 0.0
+            result[f'player_star_per_std_games_{n}'] = 0.0
+            result[f'player_rotation_minutes_std_games_{n}'] = 0.0
         return result
 
     # =========================================================================
@@ -2028,6 +2306,20 @@ class PERCalculator:
             game_id=game_id
         )
 
+        # Compute std features (per-game volatility)
+        player_filter_set = None
+        if player_filters:
+            playing_list = player_filters.get('playing', [])
+            if playing_list:
+                player_filter_set = {str(pid) for pid in playing_list}
+
+        std_features = self._compute_per_std_features(
+            team=team,
+            season=season,
+            before_date=before_date,
+            player_filter_ids=player_filter_set,
+        )
+
         return {
             'team': team,
             'season': season,
@@ -2059,7 +2351,9 @@ class PERCalculator:
             'per2_player': per2_player,
             'per3_player': per3_player,
             # Player subset features (bench, rotation, star scores, etc.)
-            **subset_features
+            **subset_features,
+            # Per-game volatility features (std)
+            **std_features,
         }
 
     def get_game_per_features(
@@ -2372,6 +2666,33 @@ class PERCalculator:
             'player_continuity|season|avg|home': home_per.get('player_continuity_avg', 0),
             'player_continuity|season|avg|away': away_per.get('player_continuity_avg', 0),
             'player_continuity|season|avg|diff': home_per.get('player_continuity_avg', 0) - away_per.get('player_continuity_avg', 0),
+
+            # player_rotation_per: Per-game rotation PER volatility
+            'player_rotation_per|games_5|std|home': home_per.get('player_rotation_per_std_games_5', 0),
+            'player_rotation_per|games_5|std|away': away_per.get('player_rotation_per_std_games_5', 0),
+            'player_rotation_per|games_5|std|diff': home_per.get('player_rotation_per_std_games_5', 0) - away_per.get('player_rotation_per_std_games_5', 0),
+
+            'player_rotation_per|games_10|std|home': home_per.get('player_rotation_per_std_games_10', 0),
+            'player_rotation_per|games_10|std|away': away_per.get('player_rotation_per_std_games_10', 0),
+            'player_rotation_per|games_10|std|diff': home_per.get('player_rotation_per_std_games_10', 0) - away_per.get('player_rotation_per_std_games_10', 0),
+
+            # player_star_per: Per-game star PER volatility (top 3 by minutes)
+            'player_star_per|games_5|std|home': home_per.get('player_star_per_std_games_5', 0),
+            'player_star_per|games_5|std|away': away_per.get('player_star_per_std_games_5', 0),
+            'player_star_per|games_5|std|diff': home_per.get('player_star_per_std_games_5', 0) - away_per.get('player_star_per_std_games_5', 0),
+
+            'player_star_per|games_10|std|home': home_per.get('player_star_per_std_games_10', 0),
+            'player_star_per|games_10|std|away': away_per.get('player_star_per_std_games_10', 0),
+            'player_star_per|games_10|std|diff': home_per.get('player_star_per_std_games_10', 0) - away_per.get('player_star_per_std_games_10', 0),
+
+            # player_rotation_minutes: Lineup stability (avg per-player minutes std)
+            'player_rotation_minutes|games_5|std|home': home_per.get('player_rotation_minutes_std_games_5', 0),
+            'player_rotation_minutes|games_5|std|away': away_per.get('player_rotation_minutes_std_games_5', 0),
+            'player_rotation_minutes|games_5|std|diff': home_per.get('player_rotation_minutes_std_games_5', 0) - away_per.get('player_rotation_minutes_std_games_5', 0),
+
+            'player_rotation_minutes|games_10|std|home': home_per.get('player_rotation_minutes_std_games_10', 0),
+            'player_rotation_minutes|games_10|std|away': away_per.get('player_rotation_minutes_std_games_10', 0),
+            'player_rotation_minutes|games_10|std|diff': home_per.get('player_rotation_minutes_std_games_10', 0) - away_per.get('player_rotation_minutes_std_games_10', 0),
 
             # Internal metadata (not used as features)
             'homePlayerCount': home_per['player_count'],

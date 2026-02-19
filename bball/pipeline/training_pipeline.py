@@ -734,7 +734,7 @@ def get_default_features(config: PipelineConfig) -> List[str]:
     return features
 
 
-def main():
+def main(argv=None):
     available_leagues = get_available_leagues()
 
     parser = argparse.ArgumentParser(
@@ -778,7 +778,7 @@ Examples:
                        help="Comma-separated list of feature names or patterns to EXCLUDE (e.g., 'player_*,inj_*')")
     parser.add_argument("--add", action="store_true",
                        help="Add/update to existing CSV: with --features updates columns, with --season/--seasons replaces season rows")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Validate --add usage
     if args.add:

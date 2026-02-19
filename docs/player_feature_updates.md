@@ -23,9 +23,12 @@
 
     {LOW_GP} =
         p for p in {ROSTER} if p.games_played_this_season < `GP_THRESH`
+    
+    {LOW_USAGE} =
+        LOW_MPG ∪ LOW_GP
 
     {USAGE_PLAYERS} =
-        {ROSTER} - {LOW_MPG} - {LOW_GP}
+        {ROSTER} - {LOW_USAGE}
 
     {INJ_PLAYERS} =
         mode="train":
@@ -280,7 +283,7 @@ SIGNALS I WANT TO CAPTURE:
     )
 
 **Top-1 Star Missing (Binary)**
-- inj_top1_star_out|none|raw|* (bool)
+- inj_top1_star_out|none|binary|* (bool)
 - players involved in calcs: Top1TeamStar
 - calc:
     Top1TeamStar = top1({USAGE_PLAYERS}, key=star_score)

@@ -40,13 +40,14 @@ class DatasetBuilder:
             self.db = db
 
         self.league = league
+        self.league_id = league.league_id if league else "nba"
         # Get league-specific master training path
         self.master_training_path = get_master_training_path(league) if league else MASTER_TRAINING_PATH
 
-        # Cache directory for datasets
+        # Cache directory for datasets — namespaced by league to prevent cross-league collisions
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(os.path.dirname(script_dir))
-        self.cache_dir = os.path.join(project_root, 'model_output', 'dataset_cache')
+        self.cache_dir = os.path.join(project_root, 'model_output', 'dataset_cache', self.league_id)
         os.makedirs(self.cache_dir, exist_ok=True)
     
     def merge_point_predictions(self, df, point_model_id: str):
@@ -79,10 +80,10 @@ class DatasetBuilder:
     def _hash_spec(self, spec: Dict) -> str:
         """
         Create a hash of the dataset spec for caching.
-        
+
         Args:
             spec: Dataset specification dict
-            
+
         Returns:
             Hash string
         """
@@ -91,7 +92,11 @@ class DatasetBuilder:
         for key, value in sorted(spec.items()):
             if value is not None:
                 normalized[key] = value
-        
+
+        # Include league ID in hash to prevent cross-league cache collisions
+        # (e.g., CBB and WCBB with same features must not share cached datasets)
+        normalized['_league_id'] = self.league_id
+
         spec_str = json.dumps(normalized, sort_keys=True)
         return hashlib.sha256(spec_str.encode()).hexdigest()[:16]
     

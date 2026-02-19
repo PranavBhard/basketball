@@ -65,6 +65,7 @@ class EnsemblePredictor(BaseEnsemblePredictor):
         stacking_mode = meta_info['stacking_mode']
         use_disagree = meta_info['use_disagree']
         use_conf = meta_info['use_conf']
+        use_logit = meta_info.get('use_logit', False)
 
         # Determine winner
         pred = 1 if ensemble_home_prob >= 0.5 else 0
@@ -91,6 +92,7 @@ class EnsemblePredictor(BaseEnsemblePredictor):
                 'stacking_mode': stacking_mode,
                 'use_disagree': use_disagree,
                 'use_conf': use_conf,
+                'use_logit': use_logit,
                 'base_models': base_model_breakdowns,
                 'meta_feature_cols': meta_feature_cols,
                 'meta_feature_values': {col: float(meta_values.get(col, 0.0)) for col in meta_feature_cols},

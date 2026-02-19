@@ -1349,7 +1349,7 @@ def compute_elo(
             return 0.0
         try:
             from bball.stats.elo_cache import EloCache
-            elo_cache = EloCache(db)
+            elo_cache = EloCache(db, league=context.get("league"))
         except Exception:
             return 0.0
 

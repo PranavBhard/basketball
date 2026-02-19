@@ -92,6 +92,7 @@ class PredictionContext(BasePredictionContext):
         # Basketball-specific caches
         self.player_stats = defaultdict(list)  # {(team, season): [player_game_records]}
         self.player_stats_by_player = defaultdict(list)  # {(player_id, season): [player_game_records]} - for cross-team aggregation
+        self.elo_cache = None  # EloCache instance (preloaded)
 
         # Stats
         self._games_loaded = 0
@@ -131,6 +132,9 @@ class PredictionContext(BasePredictionContext):
 
         # 3. Load venue cache (lightweight, always full)
         self._preload_venues()
+
+        # 4. Load Elo cache for elo features
+        self._preload_elo(seasons)
 
         self._load_time_ms = int((time.time() - start_time) * 1000)
         print(f"[PredictionContext] Preloaded {self._games_loaded} games, "
@@ -243,6 +247,15 @@ class PredictionContext(BasePredictionContext):
                     self.venue_cache[guid] = (lat, lon)
 
         print(f"[PredictionContext] Loaded {len(self.venue_cache)} venue locations")
+
+    def _preload_elo(self, seasons: List[str]):
+        """Preload Elo cache for fast elo feature lookups."""
+        try:
+            from bball.stats.elo_cache import EloCache
+            self.elo_cache = EloCache(self.db, league=self.league)
+            self.elo_cache.preload(seasons=seasons)
+        except Exception as e:
+            print(f"[PredictionContext] Warning: Failed to preload Elo cache: {e}")
 
     def get_stats(self) -> Dict:
         """Return preload statistics."""
@@ -688,12 +701,9 @@ class PredictionService(BasePredictionService):
     def _load_regular_model(self, config: Dict, context: Optional[PredictionContext] = None) -> Optional[BballModel]:
         """Load a regular (non-ensemble) classifier model."""
         try:
-            # Generate cache key from stable identifiers
-            cache_key = (
-                str(config.get('_id'))
-                if config.get('_id') is not None
-                else (config.get('config_hash') or config.get('model_path') or config.get('model_artifact_path') or '')
-            )
+            # Cache key uses model_artifact_path (aligned with BaseArtifactLoader caching)
+            # This naturally invalidates when a model is retrained (new run_id = new path)
+            cache_key = config.get('model_artifact_path') or str(config.get('_id', ''))
             if cache_key and cache_key in self._model_cache:
                 model = self._model_cache[cache_key]
                 # Inject context even for cached models (context may change per season)
@@ -745,12 +755,9 @@ class PredictionService(BasePredictionService):
                 print("Error: Ensemble config missing ensemble_run_id")
                 return None
 
-            # Generate cache key from ensemble_run_id or config _id
-            cache_key = (
-                str(config.get('_id'))
-                if config.get('_id') is not None
-                else ensemble_run_id
-            )
+            # Cache key uses ensemble_run_id (aligned with artifact-based caching in sportscore)
+            # This naturally invalidates when ensemble is retrained (new run_id = new artifacts)
+            cache_key = ensemble_run_id
             if cache_key and cache_key in self._model_cache:
                 model = self._model_cache[cache_key]
                 # Inject context even for cached models (context may change per season)

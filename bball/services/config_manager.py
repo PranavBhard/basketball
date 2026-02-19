@@ -151,7 +151,8 @@ class ModelConfigManager:
         include_per: bool = True,
         point_model_id: str = None,
         # Don't auto-select by default
-        selected: bool = False
+        selected: bool = False,
+        force_insert: bool = False
     ) -> Tuple[str, Dict]:
         """
         Create a classifier model config.
@@ -180,6 +181,9 @@ class ModelConfigManager:
             include_per: Whether PER features included
             point_model_id: Points model reference
             selected: Whether to mark as selected
+            force_insert: If True, always create a new document (skip upsert by hash).
+                         Used by recalibrate_ensemble to avoid overwriting base models
+                         shared with other ensembles.
 
         Returns:
             Tuple of (config_id, config_dict)
@@ -240,12 +244,18 @@ class ModelConfigManager:
             'updated_at': datetime.utcnow(),
         }
 
-        # Upsert by config_hash using repository
-        self._classifier_repo.upsert_config(config_hash, config)
-
-        # Get config ID
-        doc = self._classifier_repo.find_by_hash(config_hash)
-        config_id = str(doc['_id'])
+        if force_insert:
+            # Always create a new document (used by recalibrate_ensemble to isolate
+            # base model configs from existing ensembles that share the same hash)
+            import uuid
+            config['config_hash'] = f"{config_hash}_{uuid.uuid4().hex[:8]}"
+            result = self._classifier_repo.insert_one(config)
+            config_id = str(result.inserted_id)
+        else:
+            # Upsert by config_hash using repository
+            self._classifier_repo.upsert_config(config_hash, config)
+            doc = self._classifier_repo.find_by_hash(config_hash)
+            config_id = str(doc['_id'])
 
         # Handle selection safely (after upsert)
         if selected:

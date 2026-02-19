@@ -73,6 +73,14 @@ class SyncConfig:
 
 
 @dataclass
+class OddsBackfillConfig:
+    """Odds backfill step configuration from YAML."""
+    max_workers: int = 4
+    min_season: Optional[str] = None   # e.g. "2024-2025"
+    source: str = "espn"               # future: "csv", "odds_api"
+
+
+@dataclass
 class PipelineConfig:
     """Full pipeline configuration."""
     league: LeagueConfig
@@ -90,6 +98,9 @@ class PipelineConfig:
 
     # Training settings
     training: TrainingConfig = field(default_factory=TrainingConfig)
+
+    # Odds backfill settings
+    odds_backfill: OddsBackfillConfig = field(default_factory=OddsBackfillConfig)
 
     # Flags
     cache_elo: bool = True
@@ -137,6 +148,7 @@ class PipelineConfig:
         espn_config: Dict[str, Any] = {}
         post_config: Dict[str, Any] = {}
         train_config: Dict[str, Any] = {}
+        odds_config: Dict[str, Any] = {}
         cache_elo_val = True
         register_csv_val = True
 
@@ -148,6 +160,8 @@ class PipelineConfig:
                     post_config = step['post_processing'] if isinstance(step['post_processing'], dict) else {}
                 elif 'generate_training' in step:
                     train_config = step['generate_training'] if isinstance(step['generate_training'], dict) else {}
+                elif 'odds_backfill' in step:
+                    odds_config = step['odds_backfill'] if isinstance(step['odds_backfill'], dict) else {}
                 elif 'cache_elo' in step:
                     cache_elo_val = step['cache_elo'] if isinstance(step['cache_elo'], bool) else True
                 elif 'register_csv' in step:
@@ -169,6 +183,12 @@ class PipelineConfig:
             preload_injury_cache=preload.get('injury_cache', True),
         )
 
+        odds_backfill = OddsBackfillConfig(
+            max_workers=odds_config.get('max_workers', 4),
+            min_season=odds_config.get('min_season'),
+            source=odds_config.get('source', 'espn'),
+        )
+
         return cls(
             league=league,
             espn_parallel=espn_config.get('parallel', True),
@@ -179,6 +199,7 @@ class PipelineConfig:
             compute_injuries=post_config.get('compute_injuries', True),
             build_rosters=post_config.get('build_rosters', True),
             training=training,
+            odds_backfill=odds_backfill,
             cache_elo=cache_elo_val,
             register_csv=register_csv_val,
         )

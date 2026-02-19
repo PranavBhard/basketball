@@ -137,6 +137,79 @@ class InjuryFeatureCalculator:
         ]
 
     # ------------------------------------------------------------------
+    # Usage filter helpers
+    # ------------------------------------------------------------------
+
+    def _get_usage_thresholds(self):
+        """Get player filter thresholds from league config, with defaults.
+
+        Supports early/late season phases and OR-rule eligibility.
+        """
+        pf = {}
+        if self.league:
+            pf = self.league.raw.get("player_filters", {})
+        gp_ratio = pf.get("gp_ratio", 0.15)
+        return {
+            "mpg_thresh": pf.get("mpg_thresh", 10),
+            "rotation_size": pf.get("rotation_size", 10),
+            "gp_ratio_early": pf.get("gp_ratio_early", gp_ratio),
+            "gp_ratio_late": pf.get("gp_ratio_late", gp_ratio),
+            "gp_floor_early": pf.get("gp_floor_early", 3),
+            "gp_floor_late": pf.get("gp_floor_late", 10),
+            "gp_floor_phase_games": pf.get("gp_floor_phase_games", 20),
+            "min_team_games_for_filter": pf.get("min_team_games_for_filter", 5),
+            "use_or_rule": pf.get("use_or_rule", True),
+        }
+
+    def _compute_gp_thresh(self, team_gp, thresholds):
+        """Phase-aware GP threshold: lenient early, strict late."""
+        phase_games = thresholds["gp_floor_phase_games"]
+        if team_gp < phase_games:
+            gp_floor = thresholds["gp_floor_early"]
+            gp_ratio = thresholds["gp_ratio_early"]
+        else:
+            gp_floor = thresholds["gp_floor_late"]
+            gp_ratio = thresholds["gp_ratio_late"]
+        return min(team_gp, max(gp_floor, math.ceil(gp_ratio * team_gp)))
+
+    def _passes_usage_filter(self, mpg, games_played, team_gp, thresholds):
+        """Check if a player passes the USAGE filter (for PER/value features).
+
+        Uses OR rule when configured: eligible if mpg >= threshold OR gp >= threshold.
+        Skips GP filtering entirely if team hasn't played enough games.
+        """
+        passes_mpg = mpg >= thresholds["mpg_thresh"]
+
+        # Too early in season for GP filter to be meaningful
+        if team_gp < thresholds["min_team_games_for_filter"]:
+            return passes_mpg
+
+        gp_thresh = self._compute_gp_thresh(team_gp, thresholds)
+        passes_gp = games_played >= gp_thresh
+
+        if thresholds["use_or_rule"]:
+            return passes_mpg or passes_gp
+        return passes_mpg and passes_gp
+
+    def _get_team_games_played(self, team, season, before_date):
+        """Count distinct game dates for a team/season before a date."""
+        cache_key = (team, season, before_date)
+
+        # Use player stats cache — warmed cache has all players for this team
+        if cache_key not in self._injury_player_stats_cache:
+            self._warm_player_stats_cache(team, season, before_date)
+
+        all_player_stats = self._injury_player_stats_cache.get(cache_key, {})
+        if not all_player_stats:
+            return 0
+
+        # Approximate team GP as the max games_played among all team players
+        return max(
+            (s.get("games_played", 0) for s in all_player_stats.values()),
+            default=0,
+        )
+
+    # ------------------------------------------------------------------
     # Batch preloading (training)
     # ------------------------------------------------------------------
 
@@ -256,6 +329,8 @@ class InjuryFeatureCalculator:
 
         severity_cache = {}
         EPS = 1e-6
+        # Severity is a bodies/depth feature — MPG-only, no GP filter
+        mpg_thresh = self._get_usage_thresholds()["mpg_thresh"]
 
         for (team, season), team_games in team_season_games.items():
             sorted_games = sorted(team_games, key=lambda g: g["date"])
@@ -283,15 +358,15 @@ class InjuryFeatureCalculator:
                     severity = 0.0
                 severity_cache[(team, season, game_date)] = severity
 
-                # Rotation MPG at this point
+                # Rotation MPG at this point (MPG-only filter)
                 game_rotation_mpg = 0.0
                 for player_id, stats in player_cumulative.items():
                     if stats["games"] > 0:
                         mpg = stats["total_min"] / stats["games"]
-                        if mpg >= 10.0:
+                        if mpg >= mpg_thresh:
                             game_rotation_mpg += mpg
 
-                # Min lost for this game
+                # Min lost for this game (MPG-only filter)
                 game_min_lost = 0.0
                 if injured_ids:
                     for pid in injured_ids:
@@ -299,7 +374,7 @@ class InjuryFeatureCalculator:
                             stats = player_cumulative[pid]
                             if stats["games"] > 0:
                                 mpg = stats["total_min"] / stats["games"]
-                                if mpg >= 10.0:
+                                if mpg >= mpg_thresh:
                                     game_min_lost += mpg
 
                 running_rotation_mpg += game_rotation_mpg
@@ -456,6 +531,8 @@ class InjuryFeatureCalculator:
         away_injury_severity = away_features.get("injurySeverity", 0.0)
         home_inj_rotation = home_features.get("injRotation", 0.0)
         away_inj_rotation = away_features.get("injRotation", 0.0)
+        home_inj_rotation_share = home_features.get("injRotationShare", 0.0)
+        away_inj_rotation_share = away_features.get("injRotationShare", 0.0)
 
         # inj_per features
         features["inj_per|none|weighted_MIN|home"] = home_inj_per_value
@@ -510,6 +587,11 @@ class InjuryFeatureCalculator:
         features["inj_rotation_per|none|raw|away"] = away_inj_rotation
         features["inj_rotation_per|none|raw|diff"] = home_inj_rotation - away_inj_rotation
 
+        # inj_rotation_share features (fraction of rotation lost)
+        features["inj_rotation_share|none|raw|home"] = home_inj_rotation_share
+        features["inj_rotation_share|none|raw|away"] = away_inj_rotation_share
+        features["inj_rotation_share|none|raw|diff"] = home_inj_rotation_share - away_inj_rotation_share
+
         # Injury blend feature
         blend_w_sev = 0.45
         blend_w_top1 = 0.35
@@ -541,16 +623,40 @@ class InjuryFeatureCalculator:
         home_per_features = None
         away_per_features = None
 
+        # USAGE filter for per_features players (same thresholds as numerator)
+        thresholds = self._get_usage_thresholds()
+
+        def _filter_per_players_usage(per_feats, team):
+            """Filter per_features['players'] to USAGE players only."""
+            if not per_feats:
+                return []
+            players = per_feats.get("players", [])
+            if not players:
+                return []
+            team_gp = self._get_team_games_played(team, season, game_date)
+            return [
+                p for p in players
+                if self._passes_usage_filter(
+                    p.get("mpg", 0), p.get("games", 0), team_gp, thresholds,
+                )
+            ]
+
         if per_calculator:
             try:
                 home_per_features = per_calculator.compute_team_per_features(HOME, season, game_date)
                 away_per_features = per_calculator.compute_team_per_features(AWAY, season, game_date)
-                if home_per_features:
-                    home_top3_sum = home_per_features.get("top3_sum", 0.0)
-                if away_per_features:
-                    away_top3_sum = away_per_features.get("top3_sum", 0.0)
+                # Compute top3_sum from USAGE-filtered players (not raw per_features)
+                home_usage_players = _filter_per_players_usage(home_per_features, HOME)
+                away_usage_players = _filter_per_players_usage(away_per_features, AWAY)
+                if home_usage_players:
+                    home_sorted = sorted(home_usage_players, key=lambda p: p.get("per", 0), reverse=True)
+                    home_top3_sum = sum(p.get("per", 0) for p in home_sorted[:3])
+                if away_usage_players:
+                    away_sorted = sorted(away_usage_players, key=lambda p: p.get("per", 0), reverse=True)
+                    away_top3_sum = sum(p.get("per", 0) for p in away_sorted[:3])
             except Exception:
-                pass
+                home_usage_players = []
+                away_usage_players = []
 
         # inj_per_share — fraction of top-team PER injured
         inj_per_share_home = min(1.5, max(0.0, home_inj_top3_sum / (home_top3_sum + EPS)))
@@ -559,19 +665,26 @@ class InjuryFeatureCalculator:
         features["inj_per_share|none|top3_sum|away"] = inj_per_share_away
         features["inj_per_share|none|top3_sum|diff"] = inj_per_share_home - inj_per_share_away
 
-        # inj_per_share|top1_avg — binary: is top PER player injured?
+        # inj_per_share|top1_avg — binary: is top PER player (from USAGE pool) injured?
         home_top1_injured = 0.0
         away_top1_injured = 0.0
         if per_calculator:
             try:
-                home_per1_player = home_per_features.get("per1_player", []) if home_per_features else []
-                away_per1_player = away_per_features.get("per1_player", []) if away_per_features else []
-                if home_per1_player and len(home_per1_player) > 0:
-                    home_top1_id = str(home_per1_player[0].get("player_id", ""))
+                # Use USAGE-filtered players for top1 determination
+                home_usage_sorted = sorted(
+                    (home_usage_players if home_per_features else []),
+                    key=lambda p: p.get("per", 0), reverse=True,
+                )
+                away_usage_sorted = sorted(
+                    (away_usage_players if away_per_features else []),
+                    key=lambda p: p.get("per", 0), reverse=True,
+                )
+                if home_usage_sorted:
+                    home_top1_id = str(home_usage_sorted[0].get("player_id", ""))
                     if home_top1_id and home_top1_id in [str(pid) for pid in home_injured_ids]:
                         home_top1_injured = 1.0
-                if away_per1_player and len(away_per1_player) > 0:
-                    away_top1_id = str(away_per1_player[0].get("player_id", ""))
+                if away_usage_sorted:
+                    away_top1_id = str(away_usage_sorted[0].get("player_id", ""))
                     if away_top1_id and away_top1_id in [str(pid) for pid in away_injured_ids]:
                         away_top1_injured = 1.0
             except Exception:
@@ -602,7 +715,8 @@ class InjuryFeatureCalculator:
             result = {"inj_star_share": 0.0, "inj_star_score_share": 0.0, "inj_top1_star_out": 0.0}
             if not per_feats:
                 return result
-            players = per_feats.get("players", [])
+            # Use USAGE-filtered players for star features
+            players = _filter_per_players_usage(per_feats, team)
             if not players:
                 return result
 
@@ -653,9 +767,9 @@ class InjuryFeatureCalculator:
             home_star["inj_star_score_share"] - away_star["inj_star_score_share"]
         )
 
-        features["inj_top1_star_out|none|raw|home"] = home_star["inj_top1_star_out"]
-        features["inj_top1_star_out|none|raw|away"] = away_star["inj_top1_star_out"]
-        features["inj_top1_star_out|none|raw|diff"] = (
+        features["inj_top1_star_out|none|binary|home"] = home_star["inj_top1_star_out"]
+        features["inj_top1_star_out|none|binary|away"] = away_star["inj_top1_star_out"]
+        features["inj_top1_star_out|none|binary|diff"] = (
             home_star["inj_top1_star_out"] - away_star["inj_top1_star_out"]
         )
 
@@ -704,6 +818,7 @@ class InjuryFeatureCalculator:
         empty = {
             "injPerValue": 0.0, "injTop1Per": 0.0, "injTop3PerSum": 0.0,
             "injMinLost": 0.0, "injurySeverity": 0.0, "injRotation": 0.0,
+            "injRotationShare": 0.0,
             "injPerValue_players": [], "injTop1Per_players": [],
             "injTop3PerSum_players": [], "injMinLost_players": [],
             "injRotation_players": [],
@@ -716,16 +831,39 @@ class InjuryFeatureCalculator:
             return empty
 
         # Filter: only players whose last game was for this team
-        valid_players = [
+        team_players = [
             (pid, stats) for pid, stats in player_stats.items()
             if stats.get("last_game_team") == team
         ]
-        if not valid_players:
+        if not team_players:
             return empty
 
-        # Get PER values
+        # USAGE thresholds from league config
+        thresholds = self._get_usage_thresholds()
+        mpg_thresh = thresholds["mpg_thresh"]
+        team_gp = self._get_team_games_played(team, season, game_date)
+
+        # Full USAGE filter (MPG + GP with OR rule) for PER/value features
+        usage_players = [
+            (pid, s) for pid, s in team_players
+            if self._passes_usage_filter(
+                s.get("mpg", 0), s.get("games_played", 0), team_gp, thresholds,
+            )
+        ]
+
+        # MPG-only filter for bodies/depth features (min_lost, rotation, severity)
+        # A mid-season trade playing real minutes IS part of the rotation
+        rotation_players = [
+            (pid, s) for pid, s in team_players
+            if s.get("mpg", 0) >= mpg_thresh
+        ]
+
+        if not usage_players and not rotation_players:
+            return empty
+
+        # Get PER values for usage players (PER features need GP-stable estimates)
         if per_calculator:
-            for player_id, stats in valid_players:
+            for player_id, stats in usage_players:
                 per = per_calculator.get_player_per_before_date(
                     player_id, team, season, game_date,
                 )
@@ -735,14 +873,14 @@ class InjuryFeatureCalculator:
         if max_mpg == 0:
             max_mpg = 1.0
 
-        rotation_players = [(pid, s) for pid, s in valid_players if s.get("mpg", 0) >= 10]
         team_rotation_mpg = self._get_team_rotation_mpg(team, season, game_date)
 
         # Player names (skip in batch)
         player_names = {}
         if not self._batch_training_mode and self._players_dir_repo is not None:
             try:
-                ids = [str(pid) for pid, _ in valid_players]
+                all_pids = {str(pid) for pid, _ in usage_players} | {str(pid) for pid, _ in rotation_players}
+                ids = list(all_pids)
                 if ids:
                     docs = self._players_dir_repo.find(
                         {"player_id": {"$in": ids}},
@@ -752,10 +890,10 @@ class InjuryFeatureCalculator:
             except Exception:
                 pass
 
-        # 1. injPerValue: Weighted sum of injured players' PERs
+        # 1. injPerValue: Weighted sum of injured players' PERs (USAGE filter)
         inj_per_values = []
         inj_per_value_players = []
-        for player_id, stats in valid_players:
+        for player_id, stats in usage_players:
             per = stats.get("per", 0.0)
             mpg = stats.get("mpg", 0.0)
             last_played_date = stats.get("last_played_date")
@@ -774,10 +912,10 @@ class InjuryFeatureCalculator:
 
         inj_per_value = sum(inj_per_values) if inj_per_values else 0.0
 
-        # 2. injTop1Per
+        # 2. injTop1Per (USAGE filter — PER needs GP stability)
         injured_pers_with_players = [
             (s.get("per", 0.0), pid, s)
-            for pid, s in valid_players if s.get("per", 0.0) > 0
+            for pid, s in usage_players if s.get("per", 0.0) > 0
         ]
         injured_pers = [per for per, _, _ in injured_pers_with_players]
         inj_top1_per = max(injured_pers) if injured_pers else 0.0
@@ -824,6 +962,10 @@ class InjuryFeatureCalculator:
             "mpg": s.get("mpg", 0.0), "per": s.get("per", 0.0),
         } for pid, s in rotation_players]
 
+        # 6. injRotationShare: fraction of rotation players injured (bodies feature)
+        team_rotation_count = self._get_team_rotation_count(team, season, game_date)
+        inj_rotation_share = inj_rotation / team_rotation_count if team_rotation_count > 0 else 0.0
+
         return {
             "injPerValue": inj_per_value,
             "injTop1Per": inj_top1_per,
@@ -831,6 +973,7 @@ class InjuryFeatureCalculator:
             "injMinLost": inj_min_lost,
             "injurySeverity": injury_severity,
             "injRotation": float(inj_rotation),
+            "injRotationShare": inj_rotation_share,
             "injPerValue_players": inj_per_value_players,
             "injTop1Per_players": inj_top1_per_players,
             "injTop3PerSum_players": inj_top3_per_sum_players,
@@ -906,6 +1049,7 @@ class InjuryFeatureCalculator:
                 continue
             result[pid] = {
                 "mpg": agg["total_minutes"] / agg["games_played"],
+                "games_played": agg["games_played"],
                 "per": 0.0,
                 "last_played_date": agg["last_played_date"],
                 "last_game_team": agg["last_game_team"],
@@ -957,7 +1101,13 @@ class InjuryFeatureCalculator:
         return max_mpg
 
     def _get_team_rotation_mpg(self, team, season, before_date):
-        """Sum of MPG for all rotation players (mpg >= 10) on the team."""
+        """Sum of MPG for rotation players (mpg >= mpg_thresh) on the team.
+
+        Bodies/depth denominator — uses MPG-only, no GP filter.
+        A mid-season addition playing real minutes is part of the rotation.
+        """
+        mpg_thresh = self._get_usage_thresholds()["mpg_thresh"]
+
         cache_key = (team, season, before_date)
         if cache_key in self._injury_rotation_mpg_cache:
             return self._injury_rotation_mpg_cache[cache_key]
@@ -1001,11 +1151,29 @@ class InjuryFeatureCalculator:
         for pid, agg in player_mpg.items():
             if agg["games"] > 0:
                 mpg = agg["total_min"] / agg["games"]
-                if mpg >= 10.0:
+                if mpg >= mpg_thresh:
                     total_rotation_mpg += mpg
 
         self._injury_rotation_mpg_cache[cache_key] = total_rotation_mpg
         return total_rotation_mpg
+
+    def _get_team_rotation_count(self, team, season, before_date):
+        """Number of rotation players (mpg >= mpg_thresh) on the team.
+
+        Bodies/depth denominator — uses MPG-only, no GP filter.
+        """
+        mpg_thresh = self._get_usage_thresholds()["mpg_thresh"]
+
+        # Warm the full-team player stats cache
+        cache_key = (team, season, before_date)
+        if cache_key not in self._injury_player_stats_cache:
+            self._warm_player_stats_cache(team, season, before_date)
+
+        all_player_stats = self._injury_player_stats_cache.get(cache_key, {})
+        return sum(
+            1 for s in all_player_stats.values()
+            if s.get("mpg", 0.0) >= mpg_thresh and s.get("last_game_team") == team
+        )
 
     def _get_team_weighted_per_mass(
         self, team, season, game_date, game_date_obj,
@@ -1018,6 +1186,9 @@ class InjuryFeatureCalculator:
         cache_key = (team, season, game_date, recency_decay_k)
         if cache_key in self._team_weighted_per_mass_cache:
             return self._team_weighted_per_mass_cache[cache_key]
+
+        thresholds = self._get_usage_thresholds()
+        mpg_thresh = thresholds["mpg_thresh"]
 
         max_mpg = self._get_max_mpg_on_team(team, season, game_date)
         if max_mpg == 0:
@@ -1032,9 +1203,18 @@ class InjuryFeatureCalculator:
             self._team_weighted_per_mass_cache[cache_key] = 0.0
             return 0.0
 
+        # USAGE filter (PER denominator — same OR rule as numerator)
+        team_gp = max(
+            (s.get("games_played", 0) for s in all_player_stats.values()),
+            default=0,
+        )
+
         rotation_players = [
             (pid, s) for pid, s in all_player_stats.items()
-            if s.get("mpg", 0.0) >= 10.0 and s.get("last_game_team") == team
+            if s.get("last_game_team") == team
+            and self._passes_usage_filter(
+                s.get("mpg", 0.0), s.get("games_played", 0), team_gp, thresholds,
+            )
         ]
         if not rotation_players:
             self._team_weighted_per_mass_cache[cache_key] = 0.0
@@ -1106,6 +1286,7 @@ class InjuryFeatureCalculator:
                 continue
             result[pid] = {
                 "mpg": agg["total_minutes"] / agg["games_played"],
+                "games_played": agg["games_played"],
                 "per": 0.0,
                 "last_played_date": agg["last_played_date"],
                 "last_game_team": agg["last_game_team"],
@@ -1163,6 +1344,8 @@ class InjuryFeatureCalculator:
 
         total_inj_min_lost = 0.0
         total_rotation_mpg = 0.0
+        # Severity is a bodies/depth feature — MPG-only, no GP filter
+        _mpg_thresh = self._get_usage_thresholds()["mpg_thresh"]
 
         for game in prior_games:
             g_date = game.get("date")
@@ -1186,7 +1369,7 @@ class InjuryFeatureCalculator:
             game_inj_min_lost = 0.0
             for pid, stats in player_stats.items():
                 mpg = stats.get("mpg", 0.0)
-                if mpg >= 10.0 and stats.get("last_game_team") == team:
+                if mpg >= _mpg_thresh and stats.get("last_game_team") == team:
                     game_inj_min_lost += mpg
             total_inj_min_lost += game_inj_min_lost
 

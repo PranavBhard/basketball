@@ -157,34 +157,44 @@ def auto_set_lineups(db, league_config, game_date_str: str) -> Dict[str, Any]:
     details = []
 
     for team in sorted(teams):
-        # 4a. Find most recent completed game before this date
-        prev_games = games_repo.find_team_games(team, before_date=game_date_str, season=season, limit=1)
+        # 4a. Find up to 3 most recent completed games before this date
+        prev_games = games_repo.find_team_games(team, before_date=game_date_str, season=season, limit=3)
         if not prev_games:
             teams_skipped += 1
             continue
 
-        prev_game = prev_games[0]
-        prev_game_id = prev_game.get("game_id")
+        n_prev_games = len(prev_games)
 
-        # 4b. Get player stats from that game for this team
-        player_stats = list(db[player_stats_coll].find({
-            "game_id": prev_game_id,
-            "team": team,
-        }))
-
+        # 4b. Track per-player activity across recent games
+        # Most recent game determines starter/bench classification
+        # Inactivity across multiple games determines injury status
         prev_starters = set()
         prev_bench = set()
-        for ps in player_stats:
-            pid = str(ps.get("player_id", ""))
-            if not pid:
-                continue
-            # Skip players who have a stat entry but didn't actually play
-            if ps.get("didNotPlay"):
-                continue
-            if ps.get("starter"):
-                prev_starters.add(pid)
-            else:
-                prev_bench.add(pid)
+
+        for i, prev_game in enumerate(prev_games):
+            prev_game_id = prev_game.get("game_id")
+            player_stats = list(db[player_stats_coll].find({
+                "game_id": prev_game_id,
+                "team": team,
+            }))
+
+            active_pids = set()
+            for ps in player_stats:
+                pid = str(ps.get("player_id", ""))
+                if not pid:
+                    continue
+                if ps.get("didNotPlay"):
+                    continue
+                active_pids.add(pid)
+                # Only use the most recent game for starter/bench classification
+                if i == 0:
+                    if ps.get("starter"):
+                        prev_starters.add(pid)
+                    else:
+                        prev_bench.add(pid)
+
+            # Store active sets for inactivity calculation below
+            prev_games[i]["_active_pids"] = active_pids
 
         # 4c. Get current roster
         roster_doc = rosters_repo.find_roster(team, season)
@@ -193,6 +203,7 @@ def auto_set_lineups(db, league_config, game_date_str: str) -> Dict[str, Any]:
             continue
 
         # 4d. Update each player's lineup flags
+        # A player is marked injured only if inactive in >= 2 of the last N games
         updated_roster = []
         n_starters = 0
         n_bench = 0
@@ -209,9 +220,19 @@ def auto_set_lineups(db, league_config, game_date_str: str) -> Dict[str, Any]:
                 player["injured"] = False
                 n_bench += 1
             else:
-                player["starter"] = False
-                player["injured"] = True
-                n_injured += 1
+                # Count how many of the recent games this player was inactive
+                games_inactive = sum(
+                    1 for pg in prev_games if pid not in pg.get("_active_pids", set())
+                )
+                if games_inactive >= 2 or n_prev_games == 1:
+                    player["starter"] = False
+                    player["injured"] = True
+                    n_injured += 1
+                else:
+                    # Inactive in only 1 of 2-3 games — likely a rest day, not injured
+                    player["starter"] = False
+                    player["injured"] = False
+                    n_bench += 1
             updated_roster.append(player)
 
         # 4e. Write updated roster back

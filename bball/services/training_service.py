@@ -120,6 +120,7 @@ class TrainingService:
         use_master: bool = True,
         exclude_seasons: Optional[List[int]] = None,
         use_time_calibration: bool = True,
+        force_new_config: bool = False,
     ) -> Dict:
         """
         Train a base classifier model.
@@ -163,6 +164,7 @@ class TrainingService:
             exclude_seasons=exclude_seasons,
             use_master=use_master,
             name=name,
+            force_insert=force_new_config,
         )
 
         # Build model config - only include c_value for models that support it
@@ -424,6 +426,7 @@ class TrainingService:
         stacking_mode: str = 'informed',
         use_disagree: bool = False,
         use_conf: bool = False,
+        use_logit: bool = False,
     ) -> Dict:
         """
         Train an ensemble (stacking) model.
@@ -440,6 +443,7 @@ class TrainingService:
             stacking_mode: 'naive' or 'informed'
             use_disagree: Include disagreement features
             use_conf: Include confidence features
+            use_logit: If True, feed logit(p_*) to meta-learner (eps handled by sportscore)
 
         Returns:
             Dict with run_id, metrics, base_models summary
@@ -522,6 +526,7 @@ class TrainingService:
             meta_features=extra_features,
             use_disagree=use_disagree,
             use_conf=use_conf,
+            use_logit=use_logit,
         )
 
         # Create ensemble config in model_config collection
@@ -548,6 +553,7 @@ class TrainingService:
             'ensemble_meta_features': extra_features or [],
             'ensemble_use_disagree': use_disagree,
             'ensemble_use_conf': use_conf,
+            'ensemble_use_logit': use_logit,
             'model_type': meta_model_type,
             'best_c_value': meta_c_value if meta_model_type in ('LogisticRegression', 'SVM') else None,
             'features': [],  # Ensembles don't have traditional features
@@ -581,6 +587,7 @@ class TrainingService:
         artifacts = result.get('artifacts', {})
         if artifacts:
             ensemble_config['meta_model_path'] = artifacts.get('meta_model_path')
+            ensemble_config['meta_scaler_path'] = artifacts.get('meta_scaler_path')
             ensemble_config['ensemble_config_path'] = artifacts.get('ensemble_config_path')
 
         # Store stacking mode
@@ -606,6 +613,8 @@ class TrainingService:
         # Upsert ensemble config (update if exists, insert if not)
         existing = self._classifier_repo.find_one({'config_hash': config_hash})
         if existing:
+            # Preserve selected status from existing document
+            ensemble_config['selected'] = existing.get('selected', False)
             # Update existing
             self._classifier_repo.update_one(
                 {'_id': existing['_id']},
@@ -684,6 +693,7 @@ class TrainingService:
         meta_features = ensemble.get('ensemble_meta_features', [])
         use_disagree = ensemble.get('ensemble_use_disagree', False)
         use_conf = ensemble.get('ensemble_use_conf', False)
+        use_logit = ensemble.get('ensemble_use_logit', False)
         stacking_mode = ensemble.get('stacking_mode', 'naive')
         # Infer stacking mode from settings if not stored
         if not ensemble.get('stacking_mode'):
@@ -724,6 +734,7 @@ class TrainingService:
                 include_injuries=base.get('include_injuries', False),
                 exclude_seasons=exclude_seasons,
                 use_master=True,
+                force_new_config=True,
             )
             new_config_ids.append(result['config_id'])
 
@@ -738,6 +749,7 @@ class TrainingService:
             stacking_mode=stacking_mode,
             use_disagree=use_disagree,
             use_conf=use_conf,
+            use_logit=use_logit,
         )
 
         # Step 5: Update the new ensemble doc name to include time_suffix

@@ -24,6 +24,8 @@ mongo:
     cached_league_stats: cbb_cached_league_stats
     elo_cache: cbb_cached_elo_ratings
     jobs: cbb_jobs
+    market_calibration: cbb_market_calibration
+    bin_trust_weights: cbb_bin_trust_weights
 
 paths:
   master_training_csv: master_training/MASTER_TRAINING_CBB.csv
@@ -64,6 +66,17 @@ elo:
   #   - {default: 18}
   # home_advantage_overrides:
   #   tournament: 75
+
+player_filters:
+  mpg_thresh: 10
+  rotation_size: 10
+  gp_ratio_early: 0.33
+  gp_ratio_late: 0.15
+  gp_floor_early: 3
+  gp_floor_late: 10
+  gp_floor_phase_games: 20
+  min_team_games_for_filter: 5
+  use_or_rule: true
 
 training:
   min_games_played: 10
@@ -458,6 +471,9 @@ pipelines:
       - espn_pull:
           parallel: true
           max_workers: 8   # More workers for CBB (more games)
+      - odds_backfill:
+          max_workers: 4
+          min_season: "2017-2018"
       - post_processing:
           refresh_venues: true
           refresh_players: true

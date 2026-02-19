@@ -1,0 +1,595 @@
+{% extends "base.html" %}
+
+{% block title %}Market P&L Bins{% endblock %}
+
+{% block styles %}
+<style>
+    .dashboard-header {
+        margin-bottom: 30px;
+    }
+
+    .dashboard-header h1 {
+        margin-bottom: 5px;
+    }
+
+    .dashboard-subtitle {
+        color: #666;
+        font-size: 0.95em;
+    }
+
+    .header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .refresh-btn {
+        background: #667eea;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+
+    .refresh-btn:hover {
+        background: #5a67d8;
+    }
+
+    .filters-row {
+        display: flex;
+        gap: 15px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-bottom: 25px;
+        background: #f9f9f9;
+        padding: 15px 20px;
+        border-radius: 12px;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .filter-label {
+        font-size: 0.8em;
+        font-weight: 600;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .filter-select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        background: white;
+        cursor: pointer;
+        min-width: 160px;
+    }
+
+    .filter-select:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    .custom-bins-input {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        min-width: 350px;
+        font-family: 'Courier New', monospace;
+    }
+
+    .custom-bins-input:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+    .custom-bins-apply {
+        padding: 8px 16px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .custom-bins-apply:hover {
+        background: #5a67d8;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 15px;
+        margin-bottom: 25px;
+    }
+
+    .stat-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 12px;
+        padding: 18px;
+        color: white;
+    }
+
+    .stat-card.green {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    }
+
+    .stat-card.red {
+        background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+    }
+
+    .stat-card.blue {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }
+
+    .stat-card.orange {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+
+    .stat-card.dark {
+        background: linear-gradient(135deg, #434343 0%, #000000 100%);
+    }
+
+    .stat-label {
+        font-size: 0.8em;
+        opacity: 0.9;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+        font-size: 1.6em;
+        font-weight: 700;
+    }
+
+    .stat-subtext {
+        font-size: 0.75em;
+        opacity: 0.8;
+        margin-top: 4px;
+    }
+
+    .chart-section {
+        margin-bottom: 25px;
+    }
+
+    .chart-container {
+        background: #f9f9f9;
+        border-radius: 12px;
+        padding: 20px;
+        height: 380px;
+        position: relative;
+    }
+
+    .chart-title {
+        font-size: 1.1em;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 15px;
+    }
+
+    .chart-wrapper {
+        position: relative;
+        height: 310px;
+        width: 100%;
+    }
+
+    .table-container {
+        background: #f9f9f9;
+        border-radius: 12px;
+        padding: 20px;
+    }
+
+    .table-title {
+        font-size: 1.1em;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 15px;
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9em;
+    }
+
+    .data-table th {
+        text-align: left;
+        padding: 10px 8px;
+        border-bottom: 2px solid #ddd;
+        color: #666;
+        font-weight: 600;
+    }
+
+    .data-table td {
+        padding: 10px 8px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .data-table tr:hover {
+        background: #f0f0f0;
+    }
+
+    .data-table .text-right {
+        text-align: right;
+    }
+
+    .data-table tfoot td {
+        font-weight: 700;
+        border-top: 2px solid #ddd;
+        padding-top: 12px;
+    }
+
+    .positive {
+        color: #11998e;
+        font-weight: 600;
+    }
+
+    .negative {
+        color: #eb3349;
+        font-weight: 600;
+    }
+
+    .loading-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 60px;
+        color: #666;
+    }
+
+    .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #667eea;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 15px;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .error-message {
+        background: #fff5f5;
+        border: 1px solid #feb2b2;
+        color: #c53030;
+        padding: 15px 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+
+    .info-message {
+        background: #ebf8ff;
+        border: 1px solid #90cdf4;
+        color: #2b6cb0;
+        padding: 15px 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <div class="header-row">
+        <div>
+            <h1>Market P&L Bins</h1>
+            <p class="dashboard-subtitle">Analyzing positions by implied probability</p>
+        </div>
+        <button class="refresh-btn" onclick="loadBinsData(true)">Refresh</button>
+    </div>
+</div>
+
+<div class="filters-row">
+    <div class="filter-group">
+        <span class="filter-label">Market Type</span>
+        <select id="market-type" class="filter-select" onchange="loadBinsData()">
+            <option value="moneyline" selected>Moneyline</option>
+            <option value="spread">Spread</option>
+            <option value="both">Both</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Group By</span>
+        <select id="bin-mode" class="filter-select" onchange="loadBinsData()">
+            <option value="implied_prob" selected>Implied Probability</option>
+            <option value="american_odds">American Odds</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Bin Preset</span>
+        <select id="bin-preset" class="filter-select" onchange="onPresetChange()">
+            <option value="10pct" selected>10% increments</option>
+            <option value="5pct">5% increments</option>
+            <option value="betting">Betting ranges</option>
+            <option value="custom">Custom</option>
+        </select>
+    </div>
+    <div class="filter-group" id="custom-bins-group" style="display: none;">
+        <span class="filter-label">Custom Bins</span>
+        <div style="display: flex; gap: 8px;">
+            <input type="text" id="custom-bins" class="custom-bins-input"
+                   placeholder="0-15, 15-30, 30-45, 45-55, 55-70, 70-85, 85-100">
+            <button class="custom-bins-apply" onclick="loadBinsData()">Apply</button>
+        </div>
+    </div>
+</div>
+
+<div id="bins-content">
+    <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <span>Loading market data...</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+let binsChart = null;
+
+const BIN_PRESETS = {
+    '10pct': [[0,10],[10,20],[20,30],[30,40],[40,50],[50,60],[60,70],[70,80],[80,90],[90,100]],
+    '5pct': [[0,5],[5,10],[10,15],[15,20],[20,25],[25,30],[30,35],[35,40],[40,45],[45,50],
+             [50,55],[55,60],[60,65],[65,70],[70,75],[75,80],[80,85],[85,90],[90,95],[95,100]],
+    'betting': [[0,35],[35,45],[45,50],[50,55],[55,65],[65,75],[75,85],[85,100]],
+};
+
+function formatCurrency(cents) {
+    const dollars = cents / 100;
+    const sign = dollars >= 0 ? '' : '-';
+    return sign + '$' + Math.abs(dollars).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function parseBinInput(text) {
+    try {
+        const parts = text.split(',').map(s => s.trim()).filter(Boolean);
+        return parts.map(part => {
+            const [lo, hi] = part.split('-').map(Number);
+            if (isNaN(lo) || isNaN(hi)) throw new Error('Invalid');
+            return [lo, hi];
+        });
+    } catch {
+        return null;
+    }
+}
+
+function getSelectedBins() {
+    const preset = document.getElementById('bin-preset').value;
+    if (preset === 'custom') {
+        const input = document.getElementById('custom-bins').value.trim();
+        if (!input) return null; // will use server default
+        return parseBinInput(input);
+    }
+    return BIN_PRESETS[preset] || null;
+}
+
+function onPresetChange() {
+    const preset = document.getElementById('bin-preset').value;
+    document.getElementById('custom-bins-group').style.display = preset === 'custom' ? '' : 'none';
+    if (preset !== 'custom') {
+        loadBinsData();
+    }
+}
+
+async function loadBinsData(refresh = false) {
+    const content = document.getElementById('bins-content');
+    content.innerHTML = `
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <span>Loading market data...</span>
+        </div>
+    `;
+
+    const marketType = document.getElementById('market-type').value;
+    const binMode = document.getElementById('bin-mode').value;
+    const bins = getSelectedBins();
+
+    const params = new URLSearchParams();
+    params.set('market_type', marketType);
+    params.set('bin_mode', binMode);
+    if (bins) params.set('bins', JSON.stringify(bins));
+    if (refresh) params.set('refresh', 'true');
+
+    try {
+        const response = await fetch(`/api/market/bins?${params.toString()}`);
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load bins data');
+        }
+
+        renderBins(data);
+    } catch (error) {
+        content.innerHTML = `
+            <div class="error-message">
+                <strong>Error:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+function renderBins(data) {
+    const content = document.getElementById('bins-content');
+    const totals = data.totals;
+    const bins = data.bins;
+
+    const pnlClass = totals.pnl >= 0 ? 'green' : 'red';
+    const roiClass = totals.roi >= 0 ? 'green' : 'red';
+    const winClass = totals.win_pct >= 50 ? 'green' : 'red';
+
+    content.innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card blue">
+                <div class="stat-label">Positions</div>
+                <div class="stat-value">${totals.count}</div>
+                <div class="stat-subtext">${data.n_fills} fills, ${data.n_unsettled} unsettled</div>
+            </div>
+            <div class="stat-card ${winClass}">
+                <div class="stat-label">Won</div>
+                <div class="stat-value">${totals.won} / ${totals.count}</div>
+                <div class="stat-subtext">${totals.win_pct}% win rate</div>
+            </div>
+            <div class="stat-card dark">
+                <div class="stat-label">Total Cost</div>
+                <div class="stat-value">${formatCurrency(totals.cost)}</div>
+                <div class="stat-subtext">Capital deployed</div>
+            </div>
+            <div class="stat-card ${pnlClass}">
+                <div class="stat-label">P&L</div>
+                <div class="stat-value">${formatCurrency(totals.pnl)}</div>
+                <div class="stat-subtext">${totals.roi >= 0 ? '+' : ''}${totals.roi}% ROI</div>
+            </div>
+        </div>
+
+        <div class="chart-section">
+            <div class="chart-container">
+                <div class="chart-title">P&L by Implied Probability Bin</div>
+                <div class="chart-wrapper">
+                    <canvas id="binsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div class="table-title">Bin Breakdown</div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Bin</th>
+                        <th class="text-right">Count</th>
+                        <th class="text-right">Won</th>
+                        <th class="text-right">Win %</th>
+                        <th class="text-right">Cost</th>
+                        <th class="text-right">Revenue</th>
+                        <th class="text-right">P&L</th>
+                        <th class="text-right">ROI</th>
+                    </tr>
+                </thead>
+                <tbody id="bins-table-body"></tbody>
+                <tfoot>
+                    <tr>
+                        <td><strong>TOTAL</strong></td>
+                        <td class="text-right">${totals.count}</td>
+                        <td class="text-right">${totals.won}</td>
+                        <td class="text-right">${totals.win_pct}%</td>
+                        <td class="text-right">${formatCurrency(totals.cost)}</td>
+                        <td class="text-right">${formatCurrency(totals.revenue)}</td>
+                        <td class="text-right ${totals.pnl >= 0 ? 'positive' : 'negative'}">${formatCurrency(totals.pnl)}</td>
+                        <td class="text-right ${totals.roi >= 0 ? 'positive' : 'negative'}">${totals.roi >= 0 ? '+' : ''}${totals.roi}%</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    `;
+
+    // Populate table rows
+    const tbody = document.getElementById('bins-table-body');
+    tbody.innerHTML = bins.map(b => `
+        <tr>
+            <td>${b.label}</td>
+            <td class="text-right">${b.count}</td>
+            <td class="text-right">${b.won}</td>
+            <td class="text-right">${b.count > 0 ? b.win_pct + '%' : '-'}</td>
+            <td class="text-right">${b.count > 0 ? formatCurrency(b.cost) : '-'}</td>
+            <td class="text-right">${b.count > 0 ? formatCurrency(b.revenue) : '-'}</td>
+            <td class="text-right ${b.pnl >= 0 ? 'positive' : 'negative'}">${b.count > 0 ? formatCurrency(b.pnl) : '-'}</td>
+            <td class="text-right ${b.roi >= 0 ? 'positive' : 'negative'}">${b.count > 0 ? (b.roi >= 0 ? '+' : '') + b.roi + '%' : '-'}</td>
+        </tr>
+    `).join('');
+
+    // Render chart
+    renderChart(bins);
+}
+
+function renderChart(bins) {
+    const ctx = document.getElementById('binsChart').getContext('2d');
+
+    if (binsChart) {
+        binsChart.destroy();
+    }
+
+    const labels = bins.map(b => b.label);
+    const values = bins.map(b => b.pnl / 100); // cents to dollars
+    const colors = values.map(v => v >= 0 ? '#22c55e' : '#ef4444');
+    const borderColors = values.map(v => v >= 0 ? '#16a34a' : '#dc2626');
+
+    binsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'P&L ($)',
+                data: values,
+                backgroundColor: colors,
+                borderColor: borderColors,
+                borderWidth: 1,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 300 },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const bin = bins[context.dataIndex];
+                            return [
+                                `Count: ${bin.count}`,
+                                `Win%: ${bin.win_pct}%`,
+                                `ROI: ${bin.roi >= 0 ? '+' : ''}${bin.roi}%`
+                            ];
+                        },
+                        label: function(context) {
+                            const val = context.parsed.y;
+                            const sign = val >= 0 ? '' : '-';
+                            return `P&L: ${sign}$${Math.abs(val).toFixed(2)}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { maxRotation: 45, minRotation: 0 }
+                },
+                y: {
+                    grid: { color: '#eee' },
+                    ticks: {
+                        callback: function(value) {
+                            return (value >= 0 ? '' : '-') + '$' + Math.abs(value).toFixed(0);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', loadBinsData);
+</script>
+{% endblock %}

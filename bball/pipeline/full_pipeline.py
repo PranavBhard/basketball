@@ -511,7 +511,7 @@ class BasketballFullPipeline(BasePipeline):
     def __init__(self, league_id: str, config: PipelineConfig = None,
                  skip_espn: bool = False, skip_post: bool = False,
                  skip_injuries: bool = False, skip_rosters: bool = False,
-                 skip_training: bool = False,
+                 skip_training: bool = False, skip_odds: bool = False,
                  seasons: List[str] = None, max_workers: int = None,
                  dry_run: bool = False, verbose: bool = False):
         super().__init__(league_id)
@@ -522,6 +522,7 @@ class BasketballFullPipeline(BasePipeline):
         self.skip_injuries = skip_injuries
         self.skip_rosters = skip_rosters
         self.skip_training = skip_training
+        self.skip_odds = skip_odds
         self.seasons = seasons
         self.dry_run = dry_run
         self.verbose = verbose
@@ -536,6 +537,10 @@ class BasketballFullPipeline(BasePipeline):
             StepDefinition("espn_pull", self._step_espn_pull,
                           skip_condition=lambda ctx: self.skip_espn,
                           description="ESPN data pull"),
+            StepDefinition("odds_backfill", self._step_odds_backfill,
+                          skip_condition=lambda ctx: self.skip_odds,
+                          continue_on_failure=True,
+                          description="Odds backfill from ESPN"),
             StepDefinition("post_processing", self._step_post_processing,
                           skip_condition=lambda ctx: self.skip_post,
                           description="Post-processing"),
@@ -545,6 +550,9 @@ class BasketballFullPipeline(BasePipeline):
             StepDefinition("training_generation", self._step_training_generation,
                           skip_condition=lambda ctx: self.skip_training,
                           description="Master training generation"),
+            StepDefinition("market_calibration", self._step_market_calibration,
+                          continue_on_failure=True,
+                          description="Market calibration"),
             StepDefinition("csv_registration", self._step_csv_registration,
                           description="CSV registration"),
         ]
@@ -673,10 +681,34 @@ class BasketballFullPipeline(BasePipeline):
             dry_run=self.dry_run,
         )
 
+    def _step_odds_backfill(self, context: PipelineContext):
+        from bball.services.odds_backfill import backfill_espn_odds
+        from bball.mongo import Mongo
+
+        db = Mongo().db
+        stats = backfill_espn_odds(
+            db, self.league_config,
+            max_workers=self.config.odds_backfill.max_workers,
+            min_season=self.config.odds_backfill.min_season,
+            dry_run=self.dry_run,
+        )
+        context.step_results["odds_backfill"].stats = stats
+
     def _step_training_generation(self, context: PipelineContext):
         success = run_training_generation(self.config, self.dry_run)
         if not success:
             raise RuntimeError("Training generation failed")
+
+    def _step_market_calibration(self, context: PipelineContext):
+        from bball.services.market_calibration_service import compute_and_store_market_calibration
+        from bball.mongo import Mongo
+
+        db = Mongo().db
+        stats = compute_and_store_market_calibration(
+            db, self.league_config,
+            dry_run=self.dry_run,
+        )
+        context.step_results["market_calibration"].stats = stats
 
     def _step_csv_registration(self, context: PipelineContext):
         run_csv_registration(self.config, self.dry_run)
@@ -719,7 +751,7 @@ class BasketballFullPipeline(BasePipeline):
         return result
 
 
-def main():
+def main(argv=None):
     available_leagues = get_available_leagues()
 
     parser = argparse.ArgumentParser(
@@ -749,11 +781,13 @@ Examples:
                        help="Skip injury computation")
     parser.add_argument("--skip-rosters", action="store_true",
                        help="Skip roster build")
+    parser.add_argument("--skip-odds", action="store_true",
+                       help="Skip odds backfill")
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without modifying data")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Show detailed output")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     pipeline = BasketballFullPipeline(
         league_id=args.league,
@@ -762,6 +796,7 @@ Examples:
         skip_injuries=args.skip_injuries,
         skip_rosters=args.skip_rosters,
         skip_training=args.skip_training,
+        skip_odds=args.skip_odds,
         seasons=args.seasons.split(",") if args.seasons else None,
         max_workers=args.max_workers,
         dry_run=args.dry_run,
