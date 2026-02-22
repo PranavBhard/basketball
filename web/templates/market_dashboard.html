@@ -365,7 +365,7 @@
             <h1>Market Dashboard</h1>
             <p class="dashboard-subtitle">Trading performance and portfolio overview</p>
         </div>
-        <button class="refresh-btn" onclick="loadDashboardData()">Refresh</button>
+        <button class="refresh-btn" onclick="loadDashboardData(true)">Refresh Data</button>
     </div>
 </div>
 
@@ -431,17 +431,18 @@ function renderSettlementRow(s) {
     `;
 }
 
-async function loadDashboardData() {
+async function loadDashboardData(refresh = false) {
     const content = document.getElementById('dashboard-content');
     content.innerHTML = `
         <div class="loading-container">
             <div class="loading-spinner"></div>
-            <span>Loading market data...</span>
+            <span>${refresh ? 'Refreshing market data...' : 'Loading market data...'}</span>
         </div>
     `;
 
     try {
-        const response = await fetch('/api/market/dashboard');
+        const url = refresh ? '/api/market/dashboard?refresh=1' : '/api/market/dashboard';
+        const response = await fetch(url);
         const data = await response.json();
 
         if (!data.success) {

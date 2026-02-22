@@ -121,7 +121,8 @@ def generate_betting_report(
             away_team=away_team,
             home_team=home_team,
             league_id=league_id,
-            use_cache=True
+            use_cache=True,
+            cache_ttl=10
         )
 
         if not market_data:
@@ -212,3 +213,36 @@ def generate_betting_report(
     recommendations.sort(key=sort_key)
 
     return recommendations
+
+
+# Fields that are per-game and should be stripped from the grouped output
+_PER_GAME_FIELDS = {'this_game_team', 'this_game_side', 'fractional_cost', 'fractional_pnl'}
+
+
+def group_parlay_fills(portfolio_data: dict) -> list:
+    """
+    Deduplicate parlay/combo fills across all games and return one entry per ticker.
+
+    Args:
+        portfolio_data: Dict keyed by game_id, each value has a 'parlay_fills' list
+                        as produced by match_portfolio_to_games().
+
+    Returns:
+        List of parlay fill dicts, deduplicated by ticker, sorted by time (earliest first).
+    """
+    seen_tickers: set = set()
+    grouped: list = []
+
+    for game_id, game_data in portfolio_data.items():
+        for pf in game_data.get('parlay_fills', []):
+            ticker = pf.get('ticker')
+            if not ticker or ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+            # Copy and strip per-game fields
+            entry = {k: v for k, v in pf.items() if k not in _PER_GAME_FIELDS}
+            grouped.append(entry)
+
+    # Sort by time (earliest first); missing time sorts last
+    grouped.sort(key=lambda x: x.get('time') or '\xff')
+    return grouped

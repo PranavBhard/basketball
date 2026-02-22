@@ -23,6 +23,17 @@ class EnsemblePredictor(BaseEnsemblePredictor):
         self._injury_player_lists: Dict = {}
         super().__init__(db, ensemble_config, league=league)
 
+        # Also generate home/away companions for diff meta-features
+        # so the UI can show the per-team breakdown alongside the diff value
+        companions = []
+        for feat in (self.meta_feature_names or []):
+            parts = feat.split('|')
+            if len(parts) >= 4 and parts[3] == 'diff':
+                companions.append(feat.replace('|diff', '|home', 1))
+                companions.append(feat.replace('|diff', '|away', 1))
+        if companions:
+            self.all_features = self._collect_unique_features([self.all_features, companions])
+
     def _get_model_config_collection_name(self) -> str:
         if self.league:
             return self.league.collections.get('model_config_classifier', 'nba_model_config')
@@ -57,7 +68,9 @@ class EnsemblePredictor(BaseEnsemblePredictor):
 
     def _format_prediction_result(self, ensemble_home_prob: float, home_team: str, away_team: str,
                                    base_model_breakdowns: List[Dict], meta_info: Dict,
-                                   all_feature_dict: Dict) -> Dict:
+                                   all_feature_dict: Dict,
+                                   ensemble_draw_prob: float = None,
+                                   ensemble_away_prob: float = None) -> Dict:
         """Format basketball prediction result with odds, winner, and breakdown."""
         meta_values = meta_info['meta_values']
         meta_feature_cols = meta_info['meta_feature_cols']
@@ -82,9 +95,22 @@ class EnsemblePredictor(BaseEnsemblePredictor):
         else:
             odds = int(100 * (1 - winner_prob) / winner_prob)
 
+        # Extract home/away companion values for diff meta-features (for UI breakdown)
+        meta_companions = {}
+        for feat in (self.meta_feature_names or []):
+            parts = feat.split('|')
+            if len(parts) >= 4 and parts[3] == 'diff':
+                home_key = feat.replace('|diff', '|home', 1)
+                away_key = feat.replace('|diff', '|away', 1)
+                if home_key in all_feature_dict:
+                    meta_companions[home_key] = float(all_feature_dict[home_key])
+                if away_key in all_feature_dict:
+                    meta_companions[away_key] = float(all_feature_dict[away_key])
+
         # Build features_dict with ensemble breakdown nested inside
         features_dict_with_breakdown = {
             **{k: float(v) if isinstance(v, (int, float)) else v for k, v in meta_values.items()},
+            '_meta_companions': meta_companions,
             '_meta_feature_cols': meta_feature_cols,
             '_ensemble_run_id': self.ensemble_config.get('ensemble_run_id'),
             '_base_model_ids': [str(x) for x in self.base_model_ids],

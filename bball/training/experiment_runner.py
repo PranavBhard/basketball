@@ -58,7 +58,7 @@ class ExperimentRunner:
         self.classifier_models_dir = os.path.join(project_root, 'model_output', 'classifier_models')
         os.makedirs(self.classifier_models_dir, exist_ok=True)
     
-    def run_experiment(self, config: Dict, session_id: str) -> Dict:
+    def run_experiment(self, config: Dict, session_id: str, force_rebuild: bool = False) -> Dict:
         """
         Run a complete experiment.
         
@@ -93,9 +93,10 @@ class ExperimentRunner:
             'exclude_seasons': exp_config.splits.exclude_seasons,
             'include_per': exp_config.features.include_per,
             'diff_mode': exp_config.features.diff_mode,
-            'point_model_id': exp_config.features.point_model_id
+            'point_model_id': exp_config.features.point_model_id,
+            'force_rebuild': force_rebuild,
         }
-        
+
         # Build dataset
         dataset_result = self.dataset_builder.build_dataset(dataset_spec)
         dataset_id = dataset_result['dataset_id']
@@ -311,7 +312,8 @@ class ExperimentRunner:
                 'feature_importances': feature_importances,  # Model coefficients/importances
                 'n_features': len(feature_cols),
                 'n_samples': len(y),
-                'feature_names': feature_cols[:20]  # Top 20 for preview
+                'feature_names': feature_cols[:20],  # Top 20 for preview
+                'all_feature_names': list(feature_cols),  # Full list of actual features used
             }
             
             # Prepare artifacts

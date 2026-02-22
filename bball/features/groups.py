@@ -29,6 +29,8 @@ class FeatureGroups:
     PLAYER_TALENT = "player_talent"
     INJURIES = "injuries"
     POINTS_DECOMPOSITION = "points_decomposition"
+    MATCHUP_STYLE = "matchup_style"
+    STRENGTH_OF_SCHEDULE = "strength_of_schedule"
 
     # Group definitions with the stats they contain
     GROUP_DEFINITIONS: Dict[str, Dict] = {
@@ -118,6 +120,25 @@ class FeatureGroups:
 
     # Extended group definitions (added separately to avoid breaking existing layer-based queries)
     EXTENDED_GROUP_DEFINITIONS: Dict[str, Dict] = {
+        MATCHUP_STYLE: {
+            "description": "Cross-team style matchup interactions (offense vs defense)",
+            "stats": [
+                "mu_pace_delta", "mu_oreb_vs_dreb", "mu_to_vs_steals",
+                "mu_three_exposure", "mu_ft_draw_vs_fouls", "mu_paint_vs_blocks",
+                "mu_off_vs_def", "mu_ast_vs_steals",
+            ],
+            "layer": 2,
+        },
+        STRENGTH_OF_SCHEDULE: {
+            "description": "Strength of schedule — quality of opponents faced (win%, ratings, Elo, rest)",
+            "stats": [
+                "sos_opp_win_pct", "sos_opp_margin", "sos_opp_off_rtg",
+                "sos_opp_def_rtg", "sos_opp_net_rtg", "sos_opp_efg",
+                "sos_opp_ts", "sos_opp_pace", "sos_opp_elo",
+                "sos_opp_days_rest", "sos_opp_b2b_pct", "sos_opp_opp_win_pct",
+            ],
+            "layer": 3,
+        },
         H2H: {
             "description": "Head-to-head matchup history between teams (season-only)",
             "stats": ["h2h_win_pct", "margin_h2h", "h2h_games_count"],
@@ -672,6 +693,10 @@ class FeatureGroups:
         stat_name = parts[0] if parts else ''
 
         # Special prefixes that override stat-based categorization
+        if feature_name.startswith('mu_'):
+            return cls.MATCHUP_STYLE
+        if feature_name.startswith('sos_'):
+            return cls.STRENGTH_OF_SCHEDULE
         if feature_name.startswith('pred_'):
             return cls.PREDICTION_FEATURES
         if feature_name.startswith('inj_'):

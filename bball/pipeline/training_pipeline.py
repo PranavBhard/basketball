@@ -777,7 +777,7 @@ Examples:
     parser.add_argument("--exclude-features", type=str, default=None,
                        help="Comma-separated list of feature names or patterns to EXCLUDE (e.g., 'player_*,inj_*')")
     parser.add_argument("--add", action="store_true",
-                       help="Add/update to existing CSV: with --features updates columns, with --season/--seasons replaces season rows")
+                       help="Add/update to existing CSV: with --features updates columns, with --season/--seasons replaces season rows (auto-enabled when CSV exists)")
     args = parser.parse_args(argv)
 
     # Validate --add usage
@@ -787,7 +787,7 @@ Examples:
         if not has_features and not has_seasons:
             parser.error("--add requires --features/--exclude-features (to update columns) or --season/--seasons (to replace season rows)")
 
-    # Load league config
+    # Load league config (needed early to resolve output_path for --add auto-detection)
     league_config = load_league_config(args.league)
     config = PipelineConfig.from_league(league_config)
 
@@ -814,6 +814,15 @@ Examples:
             output_path = base_path + f'_limit{args.limit}'
     else:
         output_path = league_config.master_training_csv
+
+    # Auto-enable --add when the output CSV already exists and a scoped
+    # operation (--features/--exclude-features or --season/--seasons) is requested.
+    if not args.add and os.path.exists(output_path):
+        has_features = args.features is not None or args.exclude_features is not None
+        has_seasons = args.season is not None or args.seasons is not None
+        if has_features or has_seasons:
+            args.add = True
+            print(f"[auto] Existing CSV detected at {output_path} — using --add mode")
 
     print("\n" + "=" * 70)
     print(f"  {league_config.display_name} Master Training Generation")

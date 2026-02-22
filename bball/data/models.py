@@ -5,7 +5,7 @@ Handles:
 - model_config_nba: Win/loss classifier model configurations
 - model_config_points_nba: Points regression model configurations
 
-Note: For business logic (hash generation, validation), use ModelConfigManager.
+Note: For business logic (validation, creation), use ModelConfigManager.
 This repository provides pure data access operations.
 """
 
@@ -40,10 +40,6 @@ class ClassifierConfigRepository(BaseRepository):
         """Get the currently selected classifier config."""
         return self.find_one({'selected': True})
 
-    def find_by_hash(self, config_hash: str) -> Optional[Dict]:
-        """Find config by its unique hash."""
-        return self.find_one({'config_hash': config_hash})
-
     def find_by_id(self, config_id: str) -> Optional[Dict]:
         """Find config by MongoDB ObjectId."""
         return self.find_one({'_id': ObjectId(config_id)})
@@ -62,6 +58,13 @@ class ClassifierConfigRepository(BaseRepository):
     def find_ensembles(self) -> List[Dict]:
         """Get all ensemble configurations."""
         return self.find({'ensemble_models': {'$exists': True}}, sort=[('trained_at', -1)])
+
+    def find_trained_non_ensemble(self) -> List[Dict]:
+        """Find all trained models that are not ensembles."""
+        return self.find(
+            {'trained_at': {'$exists': True}, 'ensemble_models': {'$exists': False}},
+            sort=[('trained_at', -1)]
+        )
 
     def find_by_ids(self, ids: List[str], projection: Optional[Dict] = None) -> List[Dict]:
         """Batch-fetch documents by a list of string ObjectId values."""
@@ -82,27 +85,6 @@ class ClassifierConfigRepository(BaseRepository):
 
     # --- Update Methods ---
 
-    def upsert_config(self, config_hash: str, config_data: Dict) -> bool:
-        """Insert or update a config by hash."""
-        config_data['updated_at'] = datetime.utcnow()
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': config_data},
-            upsert=True
-        )
-        return result.acknowledged
-
-    def set_selected(self, config_hash: str) -> bool:
-        """Set a config as the selected one (deselects others)."""
-        # Deselect all others first
-        self.update_many({}, {'$set': {'selected': False}})
-        # Select the specified config
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': {'selected': True}}
-        )
-        return result.modified_count > 0
-
     def set_selected_by_id(self, config_id: str) -> bool:
         """Set a config as selected by its ObjectId."""
         self.update_many({}, {'$set': {'selected': False}})
@@ -112,56 +94,12 @@ class ClassifierConfigRepository(BaseRepository):
         )
         return result.modified_count > 0
 
-    def update_training_results(
-        self,
-        config_hash: str,
-        accuracy: float,
-        log_loss: float = None,
-        brier: float = None,
-        model_artifact_path: str = None,
-        scaler_artifact_path: str = None,
-        features_path: str = None
-    ) -> bool:
-        """Update training results for a config."""
-        update_data = {
-            'accuracy': accuracy,
-            'trained_at': datetime.utcnow()
-        }
-        if log_loss is not None:
-            update_data['log_loss'] = log_loss
-        if brier is not None:
-            update_data['brier'] = brier
-        if model_artifact_path:
-            update_data['model_artifact_path'] = model_artifact_path
-        if scaler_artifact_path:
-            update_data['scaler_artifact_path'] = scaler_artifact_path
-        if features_path:
-            update_data['features_path'] = features_path
-
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': update_data}
-        )
-        return result.modified_count > 0
-
-    def update_training_csv(self, config_hash: str, csv_path: str) -> bool:
-        """Update the training CSV path for a config."""
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': {'training_csv': csv_path}}
-        )
-        return result.modified_count > 0
-
-    def delete_config(self, config_hash: str) -> bool:
-        """Delete a config by hash."""
-        result = self.delete_one({'config_hash': config_hash})
+    def delete_config(self, config_id: str) -> bool:
+        """Delete a config by _id."""
+        result = self.delete_one({'_id': ObjectId(config_id)})
         return result.deleted_count > 0
 
     # --- Utility Methods ---
-
-    def config_exists(self, config_hash: str) -> bool:
-        """Check if a config with this hash exists."""
-        return self.exists({'config_hash': config_hash})
 
     def has_selected(self) -> bool:
         """Check if any config is currently selected."""
@@ -190,10 +128,6 @@ class PointsConfigRepository(BaseRepository):
         """Get the currently selected points config."""
         return self.find_one({'selected': True})
 
-    def find_by_hash(self, config_hash: str) -> Optional[Dict]:
-        """Find config by its unique hash."""
-        return self.find_one({'config_hash': config_hash})
-
     def find_by_id(self, config_id: str) -> Optional[Dict]:
         """Find config by MongoDB ObjectId."""
         return self.find_one({'_id': ObjectId(config_id)})
@@ -219,25 +153,6 @@ class PointsConfigRepository(BaseRepository):
 
     # --- Update Methods ---
 
-    def upsert_config(self, config_hash: str, config_data: Dict) -> bool:
-        """Insert or update a config by hash."""
-        config_data['updated_at'] = datetime.utcnow()
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': config_data},
-            upsert=True
-        )
-        return result.acknowledged
-
-    def set_selected(self, config_hash: str) -> bool:
-        """Set a config as the selected one (deselects others)."""
-        self.update_many({}, {'$set': {'selected': False}})
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': {'selected': True}}
-        )
-        return result.modified_count > 0
-
     def set_selected_by_id(self, config_id: str) -> bool:
         """Set a config as selected by its ObjectId."""
         self.update_many({}, {'$set': {'selected': False}})
@@ -247,47 +162,12 @@ class PointsConfigRepository(BaseRepository):
         )
         return result.modified_count > 0
 
-    def update_training_results(
-        self,
-        config_hash: str,
-        mae: float = None,
-        rmse: float = None,
-        r2: float = None,
-        model_artifact_path: str = None,
-        scaler_artifact_path: str = None,
-        features_path: str = None
-    ) -> bool:
-        """Update training results for a points config."""
-        update_data = {'trained_at': datetime.utcnow()}
-        if mae is not None:
-            update_data['mae'] = mae
-        if rmse is not None:
-            update_data['rmse'] = rmse
-        if r2 is not None:
-            update_data['r2'] = r2
-        if model_artifact_path:
-            update_data['model_artifact_path'] = model_artifact_path
-        if scaler_artifact_path:
-            update_data['scaler_artifact_path'] = scaler_artifact_path
-        if features_path:
-            update_data['features_path'] = features_path
-
-        result = self.update_one(
-            {'config_hash': config_hash},
-            {'$set': update_data}
-        )
-        return result.modified_count > 0
-
-    def delete_config(self, config_hash: str) -> bool:
-        """Delete a config by hash."""
-        result = self.delete_one({'config_hash': config_hash})
+    def delete_config(self, config_id: str) -> bool:
+        """Delete a config by _id."""
+        result = self.delete_one({'_id': ObjectId(config_id)})
         return result.deleted_count > 0
 
     # --- Utility Methods ---
-
-    def config_exists(self, config_hash: str) -> bool:
-        """Check if a config with this hash exists."""
-        return self.exists({'config_hash': config_hash})
 
     def has_selected(self) -> bool:
         """Check if any config is currently selected."""

@@ -1056,25 +1056,31 @@ class PERCalculator:
             # Return zeros for all features if no players
             return self._empty_player_subset_features()
 
-        # Calculate GP_THRESH based on team games
+        # Calculate GP_THRESH based on team games using league-config-driven thresholds
+        pfc = get_player_filter_constants(self.league)
+        _mpg_thresh = pfc["mpg_thresh"]
+        _gp_floor = pfc["gp_floor"]
+        _gp_ratio = pfc["gp_ratio"]
+        _rotation_size = pfc["rotation_size"]
+
         if team_games_played is None:
             team_games_played = 82  # Default to full season
         # Cap GP threshold at team games played (can't require more games than played)
-        ratio_thresh = math.ceil(GP_RATIO * team_games_played)
-        gp_thresh = min(team_games_played, max(GP_FLOOR, ratio_thresh))
+        ratio_thresh = math.ceil(_gp_ratio * team_games_played)
+        gp_thresh = min(team_games_played, max(_gp_floor, ratio_thresh))
 
         # Filter players based on MPG and GP thresholds
         # {USAGE_PLAYERS} = {ROSTER} - {LOW_MPG} - {LOW_GP}
         usage_players = [
             p for p in player_pers
-            if p.get('mpg', 0) >= MPG_THRESH and p.get('games', 0) >= gp_thresh
+            if p.get('mpg', 0) >= _mpg_thresh and p.get('games', 0) >= gp_thresh
         ]
 
         # Sort by MPG to get rotation
         usage_players_sorted = sorted(usage_players, key=lambda x: x.get('mpg', 0), reverse=True)
 
-        # {ROTATION} = top N by MPG, up to ROTATION_SIZE
-        rotation = usage_players_sorted[:ROTATION_SIZE]
+        # {ROTATION} = top N by MPG, up to rotation_size
+        rotation = usage_players_sorted[:_rotation_size]
 
         # Determine starters in rotation
         if starters_set is None:

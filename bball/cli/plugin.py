@@ -88,7 +88,7 @@ class GenerateTrainingDataCommand(SportCommand):
         parser.add_argument("--exclude-features", type=str, default=None,
                             help="Comma-separated features to exclude")
         parser.add_argument("--add", action="store_true",
-                            help="Add/update to existing CSV")
+                            help="Add/update to existing CSV (auto-enabled when CSV exists and --features/--season provided)")
 
     def run(self, args) -> int:
         from bball.pipeline.training_pipeline import main as tp_main

@@ -128,21 +128,19 @@ class DatasetBuilder:
                 - dropped_features: (Optional) List of features that were requested but not available in master CSV
                 - requested_feature_count: (Optional) Total number of features originally requested
         """
-        # Extract force_rebuild flag (not part of spec hash)
-        force_rebuild = dataset_spec.get('force_rebuild', False)
-        if force_rebuild:
-            print(f"[DatasetBuilder] Force rebuild requested - will bypass cache")
-        # Remove from spec dict copy to avoid validation errors
-        dataset_spec_clean = {k: v for k, v in dataset_spec.items() if k != 'force_rebuild'}
-
-        # Validate spec
+        # Validate spec (force_rebuild is a first-class field on DatasetSpec)
         try:
-            spec = DatasetSpec(**dataset_spec_clean)
+            spec = DatasetSpec(**dataset_spec)
         except Exception as e:
             raise ValueError(f"Invalid dataset spec: {e}")
 
-        # Create hash for caching
+        force_rebuild = spec.force_rebuild
+        if force_rebuild:
+            print(f"[DatasetBuilder] Force rebuild requested - will bypass cache")
+
+        # Create hash for caching (exclude force_rebuild so it doesn't affect the cache key)
         spec_dict = spec.dict(exclude_none=True)
+        spec_dict.pop('force_rebuild', None)
         dataset_id = self._hash_spec(spec_dict)
 
         # Check cache
@@ -220,60 +218,13 @@ class DatasetBuilder:
                     logging.error(f"Failed to read master CSV to get features: {e}")
                     master_features = set()
             
-            # Map master CSV features to blocks (same logic as support_tools)
+            # Map master CSV features to blocks via FeatureGroups SSoT
             from collections import defaultdict
+            from bball.features.groups import FeatureGroups
             features_by_block = defaultdict(list)
             for feature in master_features:
-                feature_lower = feature.lower()
-                if '|' in feature:
-                    parts = feature.split('|')
-                    stat_name = parts[0].lower()
-                    if 'inj' in stat_name or 'inj' in feature_lower:
-                        features_by_block['injuries'].append(feature)
-                    elif 'player_per' in stat_name or 'team_per' in stat_name or 'starters_per' in stat_name or \
-                         'per1' in stat_name or 'per2' in stat_name or 'per3' in stat_name or 'per_available' in feature_lower:
-                        features_by_block['player_talent'].append(feature)
-                    elif 'elo' in stat_name:
-                        features_by_block['elo_strength'].append(feature)
-                    elif 'rel' in feature_lower:
-                        features_by_block['era_normalization'].append(feature)
-                    elif 'off_rtg' in stat_name or 'assists_ratio' in stat_name:
-                        features_by_block['offensive_engine'].append(feature)
-                    elif 'def_rtg' in stat_name or 'blocks' in stat_name or 'reb_total' in stat_name or 'reb_' in stat_name or 'turnovers' in stat_name:
-                        features_by_block['defensive_engine'].append(feature)
-                    elif 'efg' in stat_name or 'ts' in stat_name or 'three' in stat_name:
-                        features_by_block['shooting_efficiency'].append(feature)
-                    elif 'points' in stat_name or 'wins' in stat_name:
-                        features_by_block['outcome_strength'].append(feature)
-                    elif 'pace' in stat_name or 'std' in feature_lower:
-                        features_by_block['pace_volatility'].append(feature)
-                    elif 'b2b' in stat_name or 'travel' in stat_name or 'rest' in feature_lower:
-                        features_by_block['schedule_fatigue'].append(feature)
-                    elif 'games_played' in stat_name:
-                        if 'days' in feature_lower or 'diff' in feature_lower:
-                            features_by_block['schedule_fatigue'].append(feature)
-                        else:
-                            features_by_block['sample_size'].append(feature)
-                    else:
-                        features_by_block['other'].append(feature)
-                else:
-                    # Non-standard feature names (fallback categorization)
-                    if 'Per' in feature or ('per' in feature_lower and 'percent' not in feature_lower):
-                        features_by_block['player_talent'].append(feature)
-                    elif 'Inj' in feature or 'inj' in feature_lower:
-                        features_by_block['injuries'].append(feature)
-                    elif 'Pace' in feature or 'pace' in feature_lower:
-                        features_by_block['pace_volatility'].append(feature)
-                    elif 'B2B' in feature or 'Travel' in feature or 'GamesLast' in feature or 'rest' in feature_lower:
-                        features_by_block['schedule_fatigue'].append(feature)
-                    elif 'Rel' in feature or 'rel' in feature_lower:
-                        features_by_block['era_normalization'].append(feature)
-                    elif 'Elo' in feature or 'elo' in feature_lower:
-                        features_by_block['elo_strength'].append(feature)
-                    elif 'GamesPlayed' in feature:
-                        features_by_block['sample_size'].append(feature)
-                    else:
-                        features_by_block['other'].append(feature)
+                block = FeatureGroups.get_group_for_feature(feature)
+                features_by_block[block].append(feature)
             
             # Get features for requested blocks
             features = []
@@ -330,88 +281,32 @@ class DatasetBuilder:
         
         # Validate that we have features to work with
         if len(features) == 0:
-            # Get list of valid feature blocks from master CSV for better error message
-            # Use the same helper function as support_tools to ensure consistency
+            # Determine valid blocks from master CSV via FeatureGroups SSoT
             valid_blocks = []
             if os.path.exists(self.master_training_path):
                 try:
                     import pandas as pd
+                    from bball.features.groups import FeatureGroups
                     master_df = pd.read_csv(self.master_training_path, nrows=0)
-                    meta_cols = ['Year', 'Month', 'Day', 'Home', 'Away', 'HomeWon']
-                    master_features = set([c for c in master_df.columns if c not in meta_cols])
-                    
-                    # Use same mapping logic as support_tools._map_master_features_to_blocks
-                    from collections import defaultdict
-                    temp_blocks = defaultdict(list)
+                    meta_cols = ['Year', 'Month', 'Day', 'Home', 'Away', 'HomeWon', 'game_id', 'home_points', 'away_points']
+                    master_features = [c for c in master_df.columns if c not in meta_cols]
+                    blocks_with_features = set()
                     for feature in master_features:
-                        feature_lower = feature.lower()
-                        if '|' in feature:
-                            parts = feature.split('|')
-                            stat_name = parts[0].lower()
-                            if 'inj' in stat_name or 'inj' in feature_lower:
-                                temp_blocks['injuries'].append(feature)
-                            elif 'player_per' in stat_name or 'team_per' in stat_name or 'starters_per' in stat_name or \
-                                 'per1' in stat_name or 'per2' in stat_name or 'per3' in stat_name or 'per_available' in feature_lower:
-                                temp_blocks['player_talent'].append(feature)
-                            elif 'elo' in stat_name:
-                                temp_blocks['elo_strength'].append(feature)
-                            elif 'rel' in feature_lower:
-                                temp_blocks['era_normalization'].append(feature)
-                            elif 'off_rtg' in stat_name or 'assists_ratio' in stat_name:
-                                temp_blocks['offensive_engine'].append(feature)
-                            elif 'def_rtg' in stat_name or 'blocks' in stat_name or 'reb_total' in stat_name or 'reb_' in stat_name or 'turnovers' in stat_name:
-                                temp_blocks['defensive_engine'].append(feature)
-                            elif 'efg' in stat_name or 'ts' in stat_name or 'three' in stat_name:
-                                temp_blocks['shooting_efficiency'].append(feature)
-                            elif 'points' in stat_name or 'wins' in stat_name:
-                                temp_blocks['outcome_strength'].append(feature)
-                            elif 'pace' in stat_name or 'std' in feature_lower:
-                                temp_blocks['pace_volatility'].append(feature)
-                            elif 'b2b' in stat_name or 'travel' in stat_name or 'rest' in feature_lower:
-                                temp_blocks['schedule_fatigue'].append(feature)
-                            elif 'games_played' in stat_name:
-                                if 'days' in feature_lower or 'diff' in feature_lower:
-                                    temp_blocks['schedule_fatigue'].append(feature)
-                                else:
-                                    temp_blocks['sample_size'].append(feature)
-                            else:
-                                temp_blocks['other'].append(feature)
-                        else:
-                            # Non-standard feature names (fallback categorization)
-                            if 'Per' in feature or ('per' in feature_lower and 'percent' not in feature_lower):
-                                temp_blocks['player_talent'].append(feature)
-                            elif 'Inj' in feature or 'inj' in feature_lower:
-                                temp_blocks['injuries'].append(feature)
-                            elif 'Pace' in feature or 'pace' in feature_lower:
-                                temp_blocks['pace_volatility'].append(feature)
-                            elif 'B2B' in feature or 'Travel' in feature or 'GamesLast' in feature or 'rest' in feature_lower:
-                                temp_blocks['schedule_fatigue'].append(feature)
-                            elif 'Rel' in feature or 'rel' in feature_lower:
-                                temp_blocks['era_normalization'].append(feature)
-                            elif 'Elo' in feature or 'elo' in feature_lower:
-                                temp_blocks['elo_strength'].append(feature)
-                            elif 'GamesPlayed' in feature:
-                                temp_blocks['sample_size'].append(feature)
-                            else:
-                                temp_blocks['other'].append(feature)
-                    valid_blocks = sorted([b for b, f in temp_blocks.items() if len(f) > 0])
+                        blocks_with_features.add(FeatureGroups.get_group_for_feature(feature))
+                    valid_blocks = sorted(blocks_with_features)
                 except Exception as e:
-                    # Log the exception for debugging but still show empty list
                     import logging
                     logging.warning(f"Failed to read master CSV to get valid blocks: {e}")
-                    valid_blocks = []
-            
-            invalid_blocks = []
-            if spec.feature_blocks:
-                invalid_blocks = [b for b in spec.feature_blocks if b not in valid_blocks]
-            
+
+            invalid_blocks = [b for b in (spec.feature_blocks or []) if b not in valid_blocks]
+
             error_msg = (
                 f"No features specified or available. "
                 f"Feature blocks requested: {spec.feature_blocks}, "
                 f"Individual features: {spec.individual_features}, "
                 f"include_per: {spec.include_per}. "
             )
-            
+
             if invalid_blocks:
                 error_msg += (
                     f"Invalid feature blocks: {invalid_blocks}. "
@@ -422,7 +317,7 @@ class DatasetBuilder:
                     f"Valid feature blocks are: {valid_blocks}. "
                     f"Check that feature_blocks or individual_features are provided and valid."
                 )
-            
+
             raise ValueError(error_msg)
         
         # CRITICAL: Check if master training CSV exists and has all requested features

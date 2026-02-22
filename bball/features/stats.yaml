@@ -360,6 +360,194 @@ stats:
 
 
   # ============================================================================
+  # MATCHUP/STYLE STATS
+  # ============================================================================
+  mu_pace_delta:
+    category: derived
+    description: "Tempo mismatch: team pace minus opponent pace"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_oreb_vs_dreb:
+    category: derived
+    description: "Offensive glass edge: team off_reb/gm minus opponent def_reb/gm"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_to_vs_steals:
+    category: derived
+    description: "Turnover exposure: team turnover rate times opponent steals/gm"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_three_exposure:
+    category: derived
+    description: "3P exposure: team three_rate times opponent opp_three_pct"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_ft_draw_vs_fouls:
+    category: derived
+    description: "FT drawing edge: team ft_rate minus opponent opp_ft_rate"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_paint_vs_blocks:
+    category: derived
+    description: "Interior scoring exposure: team paint_rate times opponent blocks/gm"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_off_vs_def:
+    category: derived
+    description: "Efficiency edge: team off_rtg minus opponent def_rtg per 100 poss"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  mu_ast_vs_steals:
+    category: derived
+    description: "Ball movement vs disruption: team assists/gm minus opponent steals/gm"
+    type: custom
+    handler: compute_matchup
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+
+  # ============================================================================
+  # STRENGTH OF SCHEDULE (SOS) STATS
+  # ============================================================================
+  sos_opp_win_pct:
+    category: derived
+    description: "Avg win% of opponents faced (schedule difficulty)"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_margin:
+    category: derived
+    description: "Avg point margin of opponents faced"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_off_rtg:
+    category: derived
+    description: "Avg offensive rating of opponents faced"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_def_rtg:
+    category: derived
+    description: "Avg defensive rating of opponents faced"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_net_rtg:
+    category: derived
+    description: "Avg net rating of opponents faced (off_rtg - def_rtg)"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_efg:
+    category: derived
+    description: "Avg eFG% of opponents faced"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_ts:
+    category: derived
+    description: "Avg TS% of opponents faced"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_pace:
+    category: derived
+    description: "Avg pace of opponents faced"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_elo:
+    category: derived
+    description: "Avg Elo rating of opponents at game time"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_days_rest:
+    category: derived
+    description: "Avg rest days of opponents when facing this team"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_b2b_pct:
+    category: derived
+    description: "Fraction of opponents on back-to-back when facing this team"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [games_5, games_10, games_12, games_25, season]
+
+  sos_opp_opp_win_pct:
+    category: derived
+    description: "2nd-order SOS: avg win% of opponents' opponents (season only)"
+    type: custom
+    handler: compute_sos
+    supports_side_split: true
+    valid_calc_weights: [avg]
+    valid_time_periods: [season]
+
+
+  # ============================================================================
   # SPECIAL STATS
   # ============================================================================
   home_court:

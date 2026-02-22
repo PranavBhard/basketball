@@ -5,16 +5,22 @@
 {% block content %}
 <div class="ensemble-config-container">
 
-    <div class="config-layout">
-        <!-- Left Side: Configuration Panel -->
-        <div class="config-panel">
+    <!-- Ensemble Config Modal -->
+    <div id="ensemble-config-modal" class="ensemble-modal">
+        <div class="ensemble-modal-content">
+            <div class="ensemble-modal-header">
+                <h3 id="form-mode-header">New Ensemble</h3>
+                <button type="button" onclick="closeEnsembleModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666; padding:0 5px;">&times;</button>
+            </div>
+            <div class="ensemble-modal-body">
             <form id="ensemble-config-form">
-                <!-- Ensemble Selector -->
+
+                <!-- Ensemble Name -->
                 <div class="config-section">
-                    <h3>Select Ensemble</h3>
-                    <select id="ensemble-selector" class="full-width-select">
-                        <option value="">-- Create New Ensemble --</option>
-                    </select>
+                    <div class="form-group">
+                        <label for="ensemble-name">Ensemble Name:</label>
+                        <input type="text" id="ensemble-name" name="ensemble_name" placeholder="e.g., My 3-model ensemble">
+                    </div>
                 </div>
 
                 <!-- Meta-Model Configuration -->
@@ -64,6 +70,44 @@
                     </div>
                 </div>
 
+                <!-- Meta-Model Calibration (optional) -->
+                <div class="config-section">
+                    <h3>Meta-Model Calibration <span style="font-size: 0.75em; color: #999; font-weight: normal;">(optional)</span></h3>
+
+                    <div class="form-group checkbox-group">
+                        <label><input type="checkbox" id="enable-meta-calibration" onchange="onMetaCalibrationToggle()">
+                            Enable time-based calibration for meta-model
+                        </label>
+                    </div>
+
+                    <div id="meta-calibration-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="meta-cal-method">Calibration Method:</label>
+                            <select id="meta-cal-method">
+                                <option value="isotonic">Isotonic</option>
+                                <option value="sigmoid">Sigmoid</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="meta-train-years">Meta Train Years (comma-separated):</label>
+                            <input type="text" id="meta-train-years" placeholder="e.g. 2021, 2022">
+                        </div>
+                        <div class="form-group">
+                            <label for="meta-cal-years">Meta Calibration Years (comma-separated):</label>
+                            <input type="text" id="meta-cal-years" placeholder="e.g. 2023">
+                        </div>
+                        <div class="form-group">
+                            <label for="meta-eval-year">Meta Evaluation Year:</label>
+                            <input type="number" id="meta-eval-year" placeholder="e.g. 2024" min="2007" max="2030">
+                        </div>
+                        <p class="help-text" style="font-size: 11px; color: #888; margin-top: 4px;">
+                            Splits meta-model data into 3 periods: train the meta-model on meta-train years,
+                            fit a calibrator on meta-cal years, evaluate on meta-eval year.
+                            All years must be within the base models' calibration period or later.
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Base Model Selector -->
                 <div class="config-section">
                     <h3>Base Models <span id="selected-base-count">(0 selected)</span></h3>
@@ -94,20 +138,23 @@
                     </p>
                 </div>
 
-                <!-- Action Buttons -->
-                <div class="config-actions">
-                    <button type="button" id="save-ensemble-btn" class="btn btn-secondary">Save Ensemble</button>
-                    <button type="button" id="retrain-meta-btn" class="btn btn-primary" style="display: none;">Retrain Meta-Model Only</button>
-                    <button type="button" id="retrain-full-btn" class="btn btn-primary">Train Ensemble</button>
-                </div>
             </form>
+            </div>
+            <div class="ensemble-modal-footer">
+                <button type="button" id="tertiary-action-btn" class="btn btn-retrain" style="display: none;">Retrain Meta Only</button>
+                <div style="flex: 1;"></div>
+                <button type="button" id="secondary-action-btn" class="btn btn-secondary">Save Draft</button>
+                <button type="button" id="primary-action-btn" class="btn btn-primary">Save &amp; Train</button>
+            </div>
         </div>
+    </div>
 
-        <!-- Right Side: Results Panel -->
+        <!-- Results Panel -->
         <div class="results-panel">
             <div class="results-header">
                 <h3>Ensembles</h3>
                 <div style="display: flex; gap: 10px; align-items: center;">
+                    <button type="button" class="btn btn-primary btn-small" onclick="openEnsembleModal('create')">+ New Ensemble</button>
                     <button type="button" id="refresh-ensembles-btn" class="btn btn-small">Refresh</button>
                 </div>
             </div>
@@ -225,7 +272,6 @@
                 <div id="ensembles-list"></div>
             </div>
         </div>
-    </div>
 </div>
 
 <!-- Edit Base Model Modal -->
@@ -339,23 +385,59 @@
     padding: 20px;
 }
 
-.config-layout {
-    display: grid;
-    grid-template-columns: 25% 75%;
-    gap: 30px;
-    min-height: 600px;
-    height: calc(100vh - 80px);
+/* Ensemble Config Modal */
+.ensemble-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
 }
 
-.config-panel {
-    background: #f9f9f9;
-    border-radius: 8px;
+.ensemble-modal-content {
+    background: white;
+    border-radius: 10px;
+    max-width: 640px;
+    width: 90%;
+    max-height: calc(100vh - 60px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.25);
+}
+
+.ensemble-modal-header {
+    padding: 20px 25px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.ensemble-modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 1.2em;
+}
+
+.ensemble-modal-body {
     padding: 25px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     overflow-y: auto;
-    overflow-x: hidden;
-    height: 100%;
-    max-height: calc(100vh - 80px);
+    flex: 1;
+}
+
+.ensemble-modal-footer {
+    padding: 15px 25px;
+    border-top: 1px solid #eee;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 .config-section {
@@ -491,13 +573,6 @@
     font-weight: 500;
 }
 
-.config-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 20px;
-}
-
 .btn {
     padding: 12px 24px;
     border: none;
@@ -591,8 +666,7 @@
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     display: flex;
     flex-direction: column;
-    height: 100%;
-    max-height: calc(100vh - 80px);
+    height: calc(100vh - 120px);
     overflow: hidden;
 }
 
@@ -709,6 +783,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.ensemble-name .name-display {
+    cursor: pointer;
+}
+
+.ensemble-name .name-display:hover {
+    color: #667eea;
+    text-decoration: underline;
 }
 
 .ensemble-badge {
@@ -885,6 +968,98 @@
     margin-bottom: 10px;
 }
 
+/* Meta-feature rankings in ensemble cards */
+.meta-rankings-section {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+}
+
+.meta-rankings-toggle {
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: #667eea;
+    font-weight: 700;
+    font-size: 0.88em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.meta-rankings-toggle:hover {
+    background: rgba(102, 126, 234, 0.10);
+}
+
+.meta-rankings-toggle .chev {
+    display: inline-block;
+    transition: transform 0.2s ease;
+    font-size: 0.85em;
+}
+
+.meta-rankings-toggle.expanded .chev {
+    transform: rotate(180deg);
+}
+
+.meta-rankings-content {
+    display: none;
+    margin-top: 6px;
+    padding: 0;
+}
+
+.meta-ranking-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    font-size: 0.85em;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.meta-ranking-item:last-child {
+    border-bottom: none;
+}
+
+.meta-ranking-item .rank {
+    color: #999;
+    min-width: 22px;
+    text-align: right;
+    font-family: 'Courier New', monospace;
+}
+
+.meta-ranking-item .name {
+    flex: 1;
+    font-family: 'Courier New', monospace;
+}
+
+.meta-ranking-item .name.is-prediction {
+    color: #667eea;
+    font-weight: 600;
+}
+
+.meta-ranking-item .bar-wrap {
+    width: 80px;
+    height: 8px;
+    background: #eee;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.meta-ranking-item .bar {
+    height: 100%;
+    background: #667eea;
+    border-radius: 4px;
+}
+
+.meta-ranking-item .score {
+    color: #888;
+    font-family: 'Courier New', monospace;
+    min-width: 50px;
+    text-align: right;
+}
+
 /* Feature importance expandable in base model cards */
 .base-model-features-section {
     margin-top: 8px;
@@ -969,16 +1144,28 @@ let jobPollInterval = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Event listeners
-    document.getElementById('ensemble-selector').addEventListener('change', onEnsembleSelected);
     document.getElementById('meta-model-type').addEventListener('change', onMetaModelTypeChange);
     document.getElementById('stacking-mode').addEventListener('change', onStackingModeChange);
     document.getElementById('time-config-filter').addEventListener('change', filterBaseModels);
     document.getElementById('base-model-search').addEventListener('input', filterBaseModels);
 
-    document.getElementById('save-ensemble-btn').addEventListener('click', saveEnsemble);
-    document.getElementById('retrain-meta-btn').addEventListener('click', retrainMetaOnly);
-    document.getElementById('retrain-full-btn').addEventListener('click', trainFullEnsemble);
+    document.getElementById('primary-action-btn').addEventListener('click', onPrimaryAction);
+    document.getElementById('secondary-action-btn').addEventListener('click', onSecondaryAction);
+    document.getElementById('tertiary-action-btn').addEventListener('click', onTertiaryAction);
     document.getElementById('refresh-ensembles-btn').addEventListener('click', loadEnsembles);
+
+    // Close modal on overlay click
+    document.getElementById('ensemble-config-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeEnsembleModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('ensemble-config-modal');
+            if (modal.style.display === 'flex') closeEnsembleModal();
+        }
+    });
 
     // Initialize
     loadEnsembles();
@@ -997,7 +1184,6 @@ async function loadEnsembles() {
 
         if (data.success) {
             allEnsembles = data.ensembles || [];
-            populateEnsembleSelector();
             applyFiltersAndSort();
         } else {
             showError('Failed to load ensembles: ' + data.error);
@@ -1028,17 +1214,6 @@ async function loadBaseModels() {
     }
 }
 
-function populateEnsembleSelector() {
-    const selector = document.getElementById('ensemble-selector');
-    selector.innerHTML = '<option value="">-- Create New Ensemble --</option>';
-
-    allEnsembles.forEach(ensemble => {
-        const option = document.createElement('option');
-        option.value = ensemble._id;
-        option.textContent = ensemble.name || `Ensemble (${ensemble.ensemble_models?.length || 0} models)`;
-        selector.appendChild(option);
-    });
-}
 
 function populateTimeConfigFilter() {
     const filter = document.getElementById('time-config-filter');
@@ -1150,7 +1325,7 @@ function renderEnsembles() {
         container.innerHTML = `
             <div class="empty-state">
                 <h4>No Ensembles Yet</h4>
-                <p>Select 2 or more base models from the left panel and click "Train Ensemble" to create your first ensemble.</p>
+                <p>Click "+ New Ensemble" to create your first ensemble.</p>
             </div>
         `;
         return;
@@ -1196,6 +1371,53 @@ function renderEnsembles() {
     });
 
     container.innerHTML = filtered.map(ensemble => renderEnsembleCard(ensemble)).join('');
+}
+
+function renderMetaFeatureRankings(ensemble) {
+    const arr = ensemble.features_ranked;
+    if (!arr || !Array.isArray(arr) || arr.length === 0) return '';
+
+    const contentId = `meta-rankings-${ensemble._id}`;
+    const maxScore = Math.max(...arr.map(f => Math.abs(f.score || 0)), 0.001);
+
+    // Map base model IDs to names for friendlier display of p_* features
+    const modelNameMap = {};
+    (ensemble.base_models_details || []).forEach(bm => {
+        // features_ranked uses names like p_ModelName_Suffix
+        if (bm.name) modelNameMap[bm._id] = bm.name;
+    });
+
+    const items = arr.map(f => {
+        const pct = Math.round(Math.abs(f.score || 0) / maxScore * 100);
+        const isPrediction = f.name.startsWith('p_');
+        const scoreStr = (f.score !== null && f.score !== undefined && typeof f.score === 'number')
+            ? f.score.toFixed(4) : '';
+        return `<div class="meta-ranking-item">
+            <span class="rank">${f.rank}.</span>
+            <span class="name ${isPrediction ? 'is-prediction' : ''}">${escapeHtml(f.name)}</span>
+            <span class="bar-wrap"><span class="bar" style="width: ${pct}%"></span></span>
+            <span class="score">${scoreStr}</span>
+        </div>`;
+    }).join('');
+
+    return `
+        <div class="meta-rankings-section">
+            <button class="meta-rankings-toggle" onclick="event.stopPropagation(); toggleMetaRankings(this, '${contentId}')">
+                Meta-Feature Rankings (${arr.length}) <span class="chev">&#9660;</span>
+            </button>
+            <div class="meta-rankings-content" id="${contentId}">
+                ${items}
+            </div>
+        </div>
+    `;
+}
+
+function toggleMetaRankings(btnEl, contentId) {
+    const content = document.getElementById(contentId);
+    if (!content) return;
+    const isExpanded = window.getComputedStyle(content).display !== 'none';
+    content.style.display = isExpanded ? 'none' : 'block';
+    btnEl.classList.toggle('expanded', !isExpanded);
 }
 
 function renderBaseModelFeatures(bm) {
@@ -1272,7 +1494,7 @@ function renderEnsembleCard(ensemble) {
             <div class="ensemble-header">
                 <div class="ensemble-title">
                     <div class="ensemble-name">
-                        ${escapeHtml(ensemble.name || 'Unnamed Ensemble')}
+                        <span class="name-display" onclick="editEnsembleName('${ensemble._id}', '${escapeHtml(ensemble.name || 'Unnamed Ensemble').replace(/'/g, "&#39;")}')">${escapeHtml(ensemble.name || 'Unnamed Ensemble')}</span>
                         ${isTrained ? '<span class="ensemble-badge badge-trained">Trained</span>' : '<span class="ensemble-badge badge-untrained">Untrained</span>'}
                         ${isSelected ? '<span class="ensemble-badge badge-selected">Selected</span>' : ''}
                     </div>
@@ -1321,6 +1543,17 @@ function renderEnsembleCard(ensemble) {
                 Evaluation: ${ensemble.evaluation_year || 'N/A'} |
                 Min Games: ${ensemble.min_games_played || 0}${ensemble.exclude_seasons?.length ? ' | Exclude: ' + ensemble.exclude_seasons.join(', ') : ''}
             </div>
+            ${ensemble.meta_calibration_method ? `
+            <div class="time-config-display" style="margin-top: 4px;">
+                <strong>Meta Calibration:</strong>
+                ${ensemble.meta_calibration_method} |
+                Train: ${(ensemble.meta_train_years || []).join(', ') || 'N/A'} |
+                Cal: ${(ensemble.meta_calibration_years || []).join(', ') || 'N/A'} |
+                Eval: ${ensemble.meta_evaluation_year || 'N/A'}
+            </div>
+            ` : ''}
+
+            ${renderMetaFeatureRankings(ensemble)}
 
             <div class="base-models-section">
                 <button class="base-models-toggle" onclick="toggleBaseModelsSection(this)">
@@ -1335,27 +1568,32 @@ function renderEnsembleCard(ensemble) {
     `;
 }
 
-// ========== Event Handlers ==========
+// ========== Modal Open/Close ==========
 
-function onEnsembleSelected(e) {
-    const ensembleId = e.target.value;
-    selectedEnsembleId = ensembleId || null;
-
-    if (ensembleId) {
+function openEnsembleModal(mode, ensembleId) {
+    if (mode === 'edit' && ensembleId) {
+        selectedEnsembleId = ensembleId;
         const ensemble = allEnsembles.find(e => e._id === ensembleId);
-        if (ensemble) {
-            loadEnsembleIntoForm(ensemble);
-        }
-        document.getElementById('retrain-meta-btn').style.display = ensemble?.ensemble_run_id ? 'block' : 'none';
-        document.getElementById('retrain-full-btn').textContent = 'Retrain Full Ensemble';
+        if (ensemble) loadEnsembleIntoForm(ensemble);
     } else {
+        selectedEnsembleId = null;
         resetForm();
-        document.getElementById('retrain-meta-btn').style.display = 'none';
-        document.getElementById('retrain-full-btn').textContent = 'Train Ensemble';
     }
+    updateModeUI();
+    document.getElementById('ensemble-config-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
 }
 
+function closeEnsembleModal() {
+    document.getElementById('ensemble-config-modal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+// ========== Event Handlers ==========
+
 function loadEnsembleIntoForm(ensemble) {
+    // Set name
+    document.getElementById('ensemble-name').value = ensemble.name || '';
     // Set meta-model config
     document.getElementById('meta-model-type').value = ensemble.model_type || 'LogisticRegression';
     onMetaModelTypeChange();
@@ -1376,6 +1614,17 @@ function loadEnsembleIntoForm(ensemble) {
     document.getElementById('use-logit').checked = ensemble.ensemble_use_logit || false;
     document.getElementById('custom-meta-features').value = (ensemble.ensemble_meta_features || []).join(', ');
 
+    // Meta-model calibration
+    const hasMetaCal = !!ensemble.meta_calibration_method;
+    document.getElementById('enable-meta-calibration').checked = hasMetaCal;
+    onMetaCalibrationToggle();
+    if (hasMetaCal) {
+        document.getElementById('meta-cal-method').value = ensemble.meta_calibration_method || 'isotonic';
+        document.getElementById('meta-train-years').value = (ensemble.meta_train_years || []).join(', ');
+        document.getElementById('meta-cal-years').value = (ensemble.meta_calibration_years || []).join(', ');
+        document.getElementById('meta-eval-year').value = ensemble.meta_evaluation_year || '';
+    }
+
     // Set selected base models
     selectedBaseModelIds = new Set(ensemble.ensemble_models || []);
     renderBaseModels();
@@ -1383,6 +1632,7 @@ function loadEnsembleIntoForm(ensemble) {
 
 function resetForm() {
     selectedBaseModelIds = new Set();
+    document.getElementById('ensemble-name').value = '';
     document.getElementById('meta-model-type').value = 'LogisticRegression';
     document.getElementById('meta-c-value').value = '0.1';
     document.getElementById('stacking-mode').value = 'naive';
@@ -1390,6 +1640,13 @@ function resetForm() {
     document.getElementById('use-conf').checked = false;
     document.getElementById('use-logit').checked = false;
     document.getElementById('custom-meta-features').value = '';
+    // Meta calibration
+    document.getElementById('enable-meta-calibration').checked = false;
+    document.getElementById('meta-cal-method').value = 'isotonic';
+    document.getElementById('meta-train-years').value = '';
+    document.getElementById('meta-cal-years').value = '';
+    document.getElementById('meta-eval-year').value = '';
+    onMetaCalibrationToggle();
     onMetaModelTypeChange();
     onStackingModeChange();
     renderBaseModels();
@@ -1404,6 +1661,11 @@ function onMetaModelTypeChange() {
 function onStackingModeChange() {
     const mode = document.getElementById('stacking-mode').value;
     document.getElementById('meta-features-section').style.display = mode === 'informed' ? 'block' : 'none';
+}
+
+function onMetaCalibrationToggle() {
+    const enabled = document.getElementById('enable-meta-calibration').checked;
+    document.getElementById('meta-calibration-fields').style.display = enabled ? 'block' : 'none';
 }
 
 function toggleBaseModel(modelId, isCompatible) {
@@ -1446,93 +1708,157 @@ function resetFiltersAndSort() {
     applyFiltersAndSort();
 }
 
+// ========== Mode UI ==========
+
+function updateModeUI() {
+    const header = document.getElementById('form-mode-header');
+    const primaryBtn = document.getElementById('primary-action-btn');
+    const secondaryBtn = document.getElementById('secondary-action-btn');
+    const tertiaryBtn = document.getElementById('tertiary-action-btn');
+
+    if (selectedEnsembleId) {
+        // Edit mode
+        const ensemble = allEnsembles.find(e => e._id === selectedEnsembleId);
+        const name = ensemble?.name || 'Unnamed';
+        header.textContent = 'Editing: ' + name;
+
+        primaryBtn.innerHTML = 'Save &amp; Retrain';
+        secondaryBtn.textContent = 'Save Changes';
+
+        // Show tertiary only for already-trained ensembles
+        const isTrained = ensemble && !!ensemble.ensemble_run_id;
+        tertiaryBtn.style.display = isTrained ? 'inline-block' : 'none';
+    } else {
+        // Create mode
+        header.textContent = 'New Ensemble';
+
+        primaryBtn.innerHTML = 'Save &amp; Train';
+        secondaryBtn.textContent = 'Save Draft';
+        tertiaryBtn.style.display = 'none';
+    }
+}
+
+function startNewEnsemble() {
+    openEnsembleModal('create');
+}
+
 // ========== API Actions ==========
 
-async function saveEnsemble() {
+async function saveEnsembleConfig(config) {
+    /** Shared save helper: validate then create or update. Returns ensemble_id or null. */
+    // Validate
+    const valResp = await fetch('/api/ensembles/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+    });
+    const valData = await valResp.json();
+    if (!valData.success) {
+        alert('Validation failed: ' + valData.error);
+        return null;
+    }
+
+    // Save: update existing or create new
+    const saveUrl = selectedEnsembleId
+        ? `/api/ensembles/${selectedEnsembleId}`
+        : '/api/model-configs/create-ensemble';
+    const saveMethod = selectedEnsembleId ? 'PUT' : 'POST';
+
+    const saveResp = await fetch(saveUrl, {
+        method: saveMethod,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+    });
+    const saveData = await saveResp.json();
+
+    if (!saveData.success) {
+        alert('Failed to save ensemble: ' + saveData.error);
+        return null;
+    }
+
+    // If we just created a new ensemble, track its ID
+    if (saveData.ensemble_id && !selectedEnsembleId) {
+        selectedEnsembleId = saveData.ensemble_id;
+    }
+
+    return saveData.ensemble_id || selectedEnsembleId;
+}
+
+async function startTraining(config, ensembleId) {
+    /** Shared training helper: kicks off background training job. */
+    config.model_types = [config.meta_model_type];
+    config.c_values = [parseFloat(config.meta_c_value)];
+
+    // Always pass ensemble_id so the backend updates the correct doc
+    if (ensembleId) {
+        config.ensemble_id = ensembleId;
+    }
+
+    showProgress('Starting ensemble training...');
+
+    const response = await fetch('/api/model-config/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+    });
+    const data = await response.json();
+
+    if (data.success && data.job_id) {
+        currentJobId = data.job_id;
+        pollJobProgress();
+    } else {
+        hideProgress();
+        alert('Failed to start training: ' + (data.error || 'Unknown error'));
+    }
+}
+
+async function onPrimaryAction() {
+    // Save & Train (create) or Save & Retrain (edit)
     if (selectedBaseModelIds.size < 2) {
         alert('Please select at least 2 base models for the ensemble.');
         return;
     }
 
     const config = gatherFormConfig();
-
     try {
-        const response = await fetch('/api/ensembles/validate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        const data = await response.json();
+        const ensembleId = await saveEnsembleConfig(config);
+        if (!ensembleId) return;
+        closeEnsembleModal();
+        await loadEnsembles();
+        await startTraining(config, ensembleId);
+    } catch (error) {
+        hideProgress();
+        alert('Error: ' + error.message);
+    }
+}
 
-        if (!data.success) {
-            alert('Validation failed: ' + data.error);
-            return;
-        }
+async function onSecondaryAction() {
+    // Save Draft (create) or Save Changes (edit)
+    if (selectedBaseModelIds.size < 2) {
+        alert('Please select at least 2 base models for the ensemble.');
+        return;
+    }
 
-        // Save the ensemble
-        const saveResponse = await fetch(selectedEnsembleId ? `/api/ensembles/${selectedEnsembleId}` : '/api/model-configs/create-ensemble', {
-            method: selectedEnsembleId ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        const saveData = await saveResponse.json();
-
-        if (saveData.success) {
-            alert('Ensemble saved successfully!');
-            loadEnsembles();
-        } else {
-            alert('Failed to save ensemble: ' + saveData.error);
-        }
+    const config = gatherFormConfig();
+    try {
+        const ensembleId = await saveEnsembleConfig(config);
+        if (!ensembleId) return;
+        closeEnsembleModal();
+        await loadEnsembles();
     } catch (error) {
         alert('Error saving ensemble: ' + error.message);
     }
 }
 
-async function trainFullEnsemble() {
-    if (selectedBaseModelIds.size < 2) {
-        alert('Please select at least 2 base models for the ensemble.');
-        return;
-    }
-
-    const config = gatherFormConfig();
-    config.model_types = [config.meta_model_type];
-    config.c_values = [parseFloat(config.meta_c_value)];
-
-    // If editing an existing ensemble, pass its ID so we update it instead of creating a new one
-    if (selectedEnsembleId) {
-        config.existing_ensemble_id = selectedEnsembleId;
-    }
-
-    try {
-        showProgress('Starting ensemble training...');
-
-        const response = await fetch('/api/model-config/train', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        const data = await response.json();
-
-        if (data.success && data.job_id) {
-            currentJobId = data.job_id;
-            pollJobProgress();
-        } else {
-            hideProgress();
-            alert('Failed to start training: ' + data.error);
-        }
-    } catch (error) {
-        hideProgress();
-        alert('Error starting training: ' + error.message);
-    }
-}
-
-async function retrainMetaOnly() {
+async function onTertiaryAction() {
+    // Retrain Meta Only (edit mode, trained ensembles)
     if (!selectedEnsembleId) {
         alert('Please select an existing ensemble first.');
         return;
     }
 
     try {
+        closeEnsembleModal();
         showProgress('Retraining meta-model...');
 
         const response = await fetch(`/api/ensembles/${selectedEnsembleId}/retrain-meta`, {
@@ -1617,11 +1943,7 @@ async function removeBaseModel(ensembleId, baseModelId) {
 }
 
 function editEnsemble(ensembleId) {
-    document.getElementById('ensemble-selector').value = ensembleId;
-    onEnsembleSelected({ target: { value: ensembleId } });
-
-    // Scroll to top of config panel
-    document.querySelector('.config-panel').scrollTop = 0;
+    openEnsembleModal('edit', ensembleId);
 }
 
 async function selectEnsemble(ensembleId) {
@@ -1657,8 +1979,7 @@ async function deleteEnsemble(ensembleId) {
         if (data.success) {
             if (selectedEnsembleId === ensembleId) {
                 selectedEnsembleId = null;
-                document.getElementById('ensemble-selector').value = '';
-                resetForm();
+                closeEnsembleModal();
             }
             loadEnsembles();
         } else {
@@ -1818,8 +2139,9 @@ function gatherFormConfig() {
         .map(f => f.trim())
         .filter(f => f);
 
-    return {
+    const config = {
         ensemble: true,
+        name: document.getElementById('ensemble-name').value.trim() || undefined,
         ensemble_models: Array.from(selectedBaseModelIds),
         ensemble_meta_features: customFeatures,
         ensemble_use_disagree: isNaive ? false : document.getElementById('use-disagree').checked,
@@ -1832,6 +2154,25 @@ function gatherFormConfig() {
         stacking_mode: stackingMode,
         force_rebuild_dataset: document.getElementById('force-rebuild-dataset').checked
     };
+
+    // Meta-model calibration (only when enabled)
+    const metaCalEnabled = document.getElementById('enable-meta-calibration').checked;
+    if (metaCalEnabled) {
+        config.meta_calibration_method = document.getElementById('meta-cal-method').value;
+        const trainYears = document.getElementById('meta-train-years').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        const calYears = document.getElementById('meta-cal-years').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        const evalYear = parseInt(document.getElementById('meta-eval-year').value);
+        if (trainYears.length) config.meta_train_years = trainYears;
+        if (calYears.length) config.meta_calibration_years = calYears;
+        if (!isNaN(evalYear)) config.meta_evaluation_year = evalYear;
+    } else {
+        config.meta_calibration_method = null;
+        config.meta_train_years = null;
+        config.meta_calibration_years = null;
+        config.meta_evaluation_year = null;
+    }
+
+    return config;
 }
 
 function checkTimeConfigCompatibility(model, referenceConfig) {
@@ -1854,6 +2195,64 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function editEnsembleName(ensembleId, currentName) {
+    const card = document.querySelector(`.ensemble-card[data-ensemble-id="${ensembleId}"]`);
+    if (!card) return;
+    const nameDisplay = card.querySelector('.ensemble-name .name-display');
+    if (!nameDisplay) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.style.cssText = 'width: 260px; padding: 4px 8px; border: 1px solid #667eea; border-radius: 4px; font-size: 1em; font-weight: 600;';
+
+    const saveName = async () => {
+        const newName = input.value.trim();
+        if (newName && newName !== currentName) {
+            try {
+                const leaguePrefix = window.location.pathname.split('/')[1];
+                const response = await fetch(`/${leaguePrefix}/api/model-configs/${ensembleId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name: newName })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    const ens = allEnsembles.find(e => e._id === ensembleId);
+                    if (ens) ens.name = newName;
+                    renderEnsembles();
+                } else {
+                    alert('Error updating name: ' + (data.error || 'Unknown error'));
+                    nameDisplay.textContent = currentName;
+                }
+            } catch (error) {
+                alert('Error updating name: ' + error.message);
+                nameDisplay.textContent = currentName;
+            }
+        } else {
+            nameDisplay.textContent = currentName;
+        }
+        nameDisplay.style.display = '';
+        input.remove();
+    };
+
+    input.addEventListener('blur', saveName);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            saveName();
+        } else if (e.key === 'Escape') {
+            nameDisplay.textContent = currentName;
+            nameDisplay.style.display = '';
+            input.remove();
+        }
+    });
+
+    nameDisplay.style.display = 'none';
+    nameDisplay.parentNode.insertBefore(input, nameDisplay);
+    input.focus();
+    input.select();
 }
 
 function showError(message) {
@@ -1897,6 +2296,15 @@ function copyEnsembleDetails(ensembleId) {
     lines.push(`Calibration:      ${(ensemble.calibration_years || []).join(', ') || 'N/A'}`);
     lines.push(`Evaluation Year:  ${ensemble.evaluation_year || 'N/A'}`);
     lines.push(`Min Games:        ${ensemble.min_games_played || 0}`);
+    if (ensemble.meta_calibration_method) {
+        lines.push('');
+        lines.push('META CALIBRATION');
+        lines.push('─'.repeat(30));
+        lines.push(`Method:           ${ensemble.meta_calibration_method}`);
+        lines.push(`Meta Train:       ${(ensemble.meta_train_years || []).join(', ') || 'N/A'}`);
+        lines.push(`Meta Cal:         ${(ensemble.meta_calibration_years || []).join(', ') || 'N/A'}`);
+        lines.push(`Meta Eval:        ${ensemble.meta_evaluation_year || 'N/A'}`);
+    }
 
     // Base Model Importance (ensemble's features_ranked)
     if (ensemble.features_ranked && ensemble.features_ranked.length > 0) {

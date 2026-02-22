@@ -177,7 +177,6 @@ def test_web_predict_flow_regression(game_id: str = "401810422") -> bool:
         '_id': 'fake_selected',
         'selected': True,
         'training_csv': training_csv_path,
-        'config_hash': 'fake_hash',
         'model_type': 'LogisticRegression',
         'ensemble': False,
     }
@@ -221,7 +220,7 @@ def test_web_predict_flow_regression(game_id: str = "401810422") -> bool:
     # Sanity-check wiring globals exist (these were the repeated NameError sources).
     assert hasattr(web_app, 'config_manager')
     assert hasattr(web_app, '_nba_model')
-    assert hasattr(web_app, '_nba_model_config_hash')
+    assert hasattr(web_app, '_nba_model_config_version')
 
     # Exercise get_bball_model() directly.
     model = web_app.get_bball_model()

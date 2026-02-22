@@ -201,7 +201,7 @@ def run_post_processing(config: PipelineConfig, dry_run: bool = False):
 
         print("  Geocoding venues missing coordinates...")
         try:
-            from bball.services.espn_sync import geocode_missing_venues
+            from sportscore.pipeline.traits.geocode import geocode_missing_venues
             result = geocode_missing_venues(mongo.db, config.league, dry_run=dry_run)
             geocoded = result.get('geocoded', 0)
             if geocoded:

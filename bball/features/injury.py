@@ -143,7 +143,7 @@ class InjuryFeatureCalculator:
     def _get_usage_thresholds(self):
         """Get player filter thresholds from league config, with defaults.
 
-        Supports early/late season phases and OR-rule eligibility.
+        Supports early/late season phases.
         """
         pf = {}
         if self.league:
@@ -158,7 +158,6 @@ class InjuryFeatureCalculator:
             "gp_floor_late": pf.get("gp_floor_late", 10),
             "gp_floor_phase_games": pf.get("gp_floor_phase_games", 20),
             "min_team_games_for_filter": pf.get("min_team_games_for_filter", 5),
-            "use_or_rule": pf.get("use_or_rule", True),
         }
 
     def _compute_gp_thresh(self, team_gp, thresholds):
@@ -175,7 +174,7 @@ class InjuryFeatureCalculator:
     def _passes_usage_filter(self, mpg, games_played, team_gp, thresholds):
         """Check if a player passes the USAGE filter (for PER/value features).
 
-        Uses OR rule when configured: eligible if mpg >= threshold OR gp >= threshold.
+        AND rule: eligible if mpg >= threshold AND gp >= threshold.
         Skips GP filtering entirely if team hasn't played enough games.
         """
         passes_mpg = mpg >= thresholds["mpg_thresh"]
@@ -187,8 +186,6 @@ class InjuryFeatureCalculator:
         gp_thresh = self._compute_gp_thresh(team_gp, thresholds)
         passes_gp = games_played >= gp_thresh
 
-        if thresholds["use_or_rule"]:
-            return passes_mpg or passes_gp
         return passes_mpg and passes_gp
 
     def _get_team_games_played(self, team, season, before_date):
@@ -334,7 +331,7 @@ class InjuryFeatureCalculator:
 
         for (team, season), team_games in team_season_games.items():
             sorted_games = sorted(team_games, key=lambda g: g["date"])
-            player_cumulative = defaultdict(lambda: {"total_min": 0.0, "games": 0})
+            player_cumulative = defaultdict(lambda: {"total_min": 0.0, "games": 0, "last_game_team": None})
 
             player_records = self._injury_preloaded_players.get((team, season), [])
             records_by_date = defaultdict(list)
@@ -358,21 +355,21 @@ class InjuryFeatureCalculator:
                     severity = 0.0
                 severity_cache[(team, season, game_date)] = severity
 
-                # Rotation MPG at this point (MPG-only filter)
+                # Rotation MPG at this point (MPG-only filter, last_game_team == team)
                 game_rotation_mpg = 0.0
                 for player_id, stats in player_cumulative.items():
-                    if stats["games"] > 0:
+                    if stats["games"] > 0 and stats["last_game_team"] == team:
                         mpg = stats["total_min"] / stats["games"]
                         if mpg >= mpg_thresh:
                             game_rotation_mpg += mpg
 
-                # Min lost for this game (MPG-only filter)
+                # Min lost for this game (MPG-only filter, last_game_team == team)
                 game_min_lost = 0.0
                 if injured_ids:
                     for pid in injured_ids:
                         if pid in player_cumulative:
                             stats = player_cumulative[pid]
-                            if stats["games"] > 0:
+                            if stats["games"] > 0 and stats["last_game_team"] == team:
                                 mpg = stats["total_min"] / stats["games"]
                                 if mpg >= mpg_thresh:
                                     game_min_lost += mpg
@@ -387,6 +384,7 @@ class InjuryFeatureCalculator:
                     if minutes > 0:
                         player_cumulative[pid]["total_min"] += minutes
                         player_cumulative[pid]["games"] += 1
+                        player_cumulative[pid]["last_game_team"] = record.get("team")
 
         print(f"  Precomputed {len(severity_cache)} season severity values")
         self._season_injury_severity_cache.update(severity_cache)
@@ -843,7 +841,7 @@ class InjuryFeatureCalculator:
         mpg_thresh = thresholds["mpg_thresh"]
         team_gp = self._get_team_games_played(team, season, game_date)
 
-        # Full USAGE filter (MPG + GP with OR rule) for PER/value features
+        # Full USAGE filter (MPG + GP with AND rule) for PER/value features
         usage_players = [
             (pid, s) for pid, s in team_players
             if self._passes_usage_filter(
@@ -1059,43 +1057,21 @@ class InjuryFeatureCalculator:
         return {pid: result[pid] for pid in player_ids_set if pid in result}
 
     def _get_max_mpg_on_team(self, team, season, before_date):
-        """Max MPG among all players on the team (season-to-date)."""
+        """Max MPG among players whose last game was for this team (season-to-date)."""
         cache_key = (team, season, before_date)
         if cache_key in self._injury_max_mpg_cache:
             return self._injury_max_mpg_cache[cache_key]
 
-        if self._injury_cache_loaded and (team, season) in self._injury_preloaded_players:
-            all_players = [
-                r for r in self._injury_preloaded_players[(team, season)]
-                if r.get("date", "") < before_date
-            ]
-        else:
-            all_players = self._players_repo.find(
-                {
-                    "team": team, "season": season,
-                    "date": {"$lt": before_date},
-                    "stats.min": {"$gt": 0},
-                    "game_type": {"$nin": self._exclude_game_types},
-                },
-                projection={"player_id": 1, "stats.min": 1},
-            )
+        # Warm the full-team player stats cache (reuse shared aggregation)
+        if cache_key not in self._injury_player_stats_cache:
+            self._warm_player_stats_cache(team, season, before_date)
 
-        if not all_players:
-            self._injury_max_mpg_cache[cache_key] = 0.0
-            return 0.0
-
-        player_mpg = defaultdict(lambda: {"total_min": 0.0, "games": 0})
-        for record in all_players:
-            pid = str(record.get("player_id"))
-            minutes = record.get("stats", {}).get("min", 0.0)
-            player_mpg[pid]["total_min"] += minutes
-            player_mpg[pid]["games"] += 1
-
-        max_mpg = 0.0
-        for pid, agg in player_mpg.items():
-            if agg["games"] > 0:
-                mpg = agg["total_min"] / agg["games"]
-                max_mpg = max(max_mpg, mpg)
+        all_player_stats = self._injury_player_stats_cache.get(cache_key, {})
+        max_mpg = max(
+            (s.get("mpg", 0.0) for s in all_player_stats.values()
+             if s.get("last_game_team") == team),
+            default=0.0,
+        )
 
         self._injury_max_mpg_cache[cache_key] = max_mpg
         return max_mpg
@@ -1105,54 +1081,23 @@ class InjuryFeatureCalculator:
 
         Bodies/depth denominator — uses MPG-only, no GP filter.
         A mid-season addition playing real minutes is part of the rotation.
+        Only includes players whose last game was for this team.
         """
-        mpg_thresh = self._get_usage_thresholds()["mpg_thresh"]
-
         cache_key = (team, season, before_date)
         if cache_key in self._injury_rotation_mpg_cache:
             return self._injury_rotation_mpg_cache[cache_key]
 
-        if self._injury_cache_loaded and (team, season) in self._injury_preloaded_players:
-            all_players = [
-                r for r in self._injury_preloaded_players[(team, season)]
-                if r.get("date", "") < before_date
-            ]
-        else:
-            if not hasattr(self, "_db_fallback_rotation_mpg"):
-                self._db_fallback_rotation_mpg = 0
-            self._db_fallback_rotation_mpg += 1
-            if self._db_fallback_rotation_mpg <= 3:
-                print(
-                    f"[DB FALLBACK] _get_team_rotation_mpg #{self._db_fallback_rotation_mpg}: "
-                    f"team={team}, season={season}"
-                )
-            all_players = self._players_repo.find(
-                {
-                    "team": team, "season": season,
-                    "date": {"$lt": before_date},
-                    "stats.min": {"$gt": 0},
-                    "game_type": {"$nin": self._exclude_game_types},
-                },
-                projection={"player_id": 1, "stats.min": 1},
-            )
+        mpg_thresh = self._get_usage_thresholds()["mpg_thresh"]
 
-        if not all_players:
-            self._injury_rotation_mpg_cache[cache_key] = 0.0
-            return 0.0
+        # Warm the full-team player stats cache (reuse shared aggregation)
+        if cache_key not in self._injury_player_stats_cache:
+            self._warm_player_stats_cache(team, season, before_date)
 
-        player_mpg = defaultdict(lambda: {"total_min": 0.0, "games": 0})
-        for record in all_players:
-            pid = str(record.get("player_id"))
-            minutes = record.get("stats", {}).get("min", 0.0)
-            player_mpg[pid]["total_min"] += minutes
-            player_mpg[pid]["games"] += 1
-
-        total_rotation_mpg = 0.0
-        for pid, agg in player_mpg.items():
-            if agg["games"] > 0:
-                mpg = agg["total_min"] / agg["games"]
-                if mpg >= mpg_thresh:
-                    total_rotation_mpg += mpg
+        all_player_stats = self._injury_player_stats_cache.get(cache_key, {})
+        total_rotation_mpg = sum(
+            s.get("mpg", 0.0) for s in all_player_stats.values()
+            if s.get("last_game_team") == team and s.get("mpg", 0.0) >= mpg_thresh
+        )
 
         self._injury_rotation_mpg_cache[cache_key] = total_rotation_mpg
         return total_rotation_mpg
@@ -1203,7 +1148,7 @@ class InjuryFeatureCalculator:
             self._team_weighted_per_mass_cache[cache_key] = 0.0
             return 0.0
 
-        # USAGE filter (PER denominator — same OR rule as numerator)
+        # USAGE filter (PER denominator — same AND rule as numerator)
         team_gp = max(
             (s.get("games_played", 0) for s in all_player_stats.values()),
             default=0,

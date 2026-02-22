@@ -192,9 +192,13 @@ class PredictionContext(BasePredictionContext):
 
     def _preload_player_stats(self, seasons: List[str]):
         """Load player stats for injury/PER features."""
+        exclude_game_types = (
+            self.league.exclude_game_types if self.league else ['preseason', 'allstar']
+        )
         query = {
             'season': {'$in': seasons},
-            'stats.min': {'$gt': 0}  # Only players who played
+            'stats.min': {'$gt': 0},  # Only players who played
+            'game_type': {'$nin': exclude_game_types},
         }
 
         if self.teams:
@@ -485,12 +489,9 @@ class PredictionService(BasePredictionService):
             return self._error_result(home_team, away_team, game_date, game_id, error_msg)
 
         # Get or create prediction context for this season (preloads data once).
-        # If a full-season context already exists (e.g., from predict_date batch),
-        # reuse it. Otherwise, create a team-scoped context for faster single-game loads.
-        if season in self._context_cache:
-            context = self._context_cache[season]
-        else:
-            context = self._get_or_create_context(season, teams=[home_team, away_team])
+        # Always load full season — SOS features need all opponents' game data,
+        # not just the two teams playing.
+        context = self._get_or_create_context(season)
 
         # Load classifier model with preloaded context
         model = self._load_classifier_model(classifier_config, context)
@@ -823,7 +824,7 @@ class PredictionService(BasePredictionService):
             cache_key = (
                 str(config.get('_id'))
                 if config.get('_id') is not None
-                else (config.get('config_hash') or config.get('model_path') or config.get('model_artifact_path') or '')
+                else (config.get('model_path') or config.get('model_artifact_path') or '')
             )
             if cache_key and cache_key in self._points_model_cache:
                 return self._points_model_cache[cache_key]

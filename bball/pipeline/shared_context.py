@@ -74,7 +74,10 @@ class SharedFeatureContext:
             for f in feature_names
         )
         self._needs_injuries = any(f.startswith("inj_") for f in feature_names)
-        self._needs_elo = any(f.split("|", 1)[0].lower().startswith("elo") for f in feature_names)
+        self._needs_elo = any(
+            f.split("|", 1)[0].lower().startswith("elo") or f.split("|", 1)[0] == "sos_opp_elo"
+            for f in feature_names
+        )
 
         # Categorize features upfront for efficient per-row processing
         self._regular_features = []

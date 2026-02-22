@@ -211,7 +211,7 @@ _per_calculator = None
 
 # Cache for classifier model (shared across requests)
 _nba_model = None
-_nba_model_config_hash = None
+_nba_model_config_version = None
 
 # Cache for points model trainer (shared across requests)
 _points_trainer = None
@@ -318,37 +318,46 @@ def create_ensemble_model(ensemble_config: dict, league=None):
         return None
 
 
+def _config_version(config):
+    """Build a cache version string from a config's _id and updated_at."""
+    if not config:
+        return None
+    _id = str(config.get('_id', ''))
+    updated = str(config.get('updated_at', ''))
+    return f"{_id}_{updated}"
+
+
 def get_bball_model():
     """Get or create NBAModel instance using unified infrastructure."""
-    global _nba_model, _nba_model_config_hash
-    
+    global _nba_model, _nba_model_config_version
+
     # Get current selected config using unified manager
     selected_config = config_manager.get_selected_config()
-    current_config_hash = selected_config.get('config_hash') if selected_config else None
-    
+    current_version = _config_version(selected_config)
+
     # Check if cached model matches current config
     if _nba_model is not None:
-        if _nba_model_config_hash is not None:
-            if current_config_hash != _nba_model_config_hash:
-                print(f"Model config changed (hash: {_nba_model_config_hash} -> {current_config_hash}). Reloading model...")
+        if _nba_model_config_version is not None:
+            if current_version != _nba_model_config_version:
+                print(f"Model config changed. Reloading model...")
                 _nba_model = None
-                _nba_model_config_hash = None
-        elif current_config_hash is not None:
-            print(f"Switching from cached model to MongoDB config (hash: {current_config_hash}). Reloading model...")
+                _nba_model_config_version = None
+        elif current_version is not None:
+            print(f"Switching from cached model to MongoDB config. Reloading model...")
             _nba_model = None
-            _nba_model_config_hash = None
-    
+            _nba_model_config_version = None
+
     if _nba_model is None:
         # Check if selected config is an ensemble
         if selected_config and selected_config.get('ensemble', False):
             print("Loading ensemble model...")
             _nba_model = create_ensemble_model(selected_config, league=getattr(g, 'league', None))
             if _nba_model:
-                _nba_model_config_hash = current_config_hash
+                _nba_model_config_version = current_version
                 return _nba_model
             else:
                 print("Failed to create ensemble model, falling back to regular model")
-        
+
         # Create regular model using unified factory
         _nba_model = NBAModel(
             classifier_features=get_default_classifier_features(),
@@ -359,7 +368,7 @@ def get_bball_model():
             include_per_features=True,
             preload_data=False
         )
-        
+
         # Load model using unified factory from config
         if selected_config and not selected_config.get('ensemble', False):
             try:
@@ -368,25 +377,25 @@ def get_bball_model():
                 _nba_model.scaler = scaler
                 _nba_model.feature_names = feature_names
                 _nba_model.classifier_features = feature_names
-                _nba_model_config_hash = current_config_hash
+                _nba_model_config_version = current_version
                 print(f"✅ Loaded model from config: {selected_config.get('model_type')} (artifacts: {'fast' if selected_config.get('model_artifact_path') else 'trained'})")
                 return _nba_model
             except Exception as e:
                 print(f"❌ Failed to load model from config: {e}")
                 import traceback
                 traceback.print_exc()
-        
+
         # Fallback to cached model (try with PER first, then without)
         try:
             _nba_model.load_cached_model(no_per=False)
-            _nba_model_config_hash = None
+            _nba_model_config_version = None
         except:
             try:
                 _nba_model.load_cached_model(no_per=True)
-                _nba_model_config_hash = None
+                _nba_model_config_version = None
             except:
                 pass  # Model not cached yet
-    
+
     return _nba_model
 
 
@@ -489,102 +498,24 @@ def load_features_from_master_csv():
         # Log for debugging
         print(f"[load_features_from_master_csv] Loaded {len(features)} features from {master_training_path}")
         
-        # Group features into sets based on naming patterns
+        # Categorize features via FeatureGroups SSoT
+        from bball.features.groups import FeatureGroups
         feature_sets = defaultdict(list)
-        
         for feature in features:
-            feature_lower = feature.lower()
-            
-            # Check for point prediction features first (pred_*)
-            if feature.startswith('pred_'):
-                feature_sets['point_predictions'].append(feature)
-                continue
-            
-            # Parse feature name to determine set
-            if '|' in feature:
-                parts = feature.split('|')
-                stat_name = parts[0].lower()
-                
-                # Determine feature set based on stat name and patterns
-                # Check in order of specificity (more specific first)
-                if 'inj' in stat_name or 'inj' in feature_lower:
-                    feature_sets['injuries'].append(feature)
-                elif stat_name.startswith('player_') or 'team_per' in stat_name or 'starters_per' in stat_name or \
-                     'per1' in stat_name or 'per2' in stat_name or 'per3' in stat_name or 'per_available' in feature_lower:
-                    feature_sets['player_talent'].append(feature)
-                elif 'elo' in stat_name:
-                    feature_sets['elo_strength'].append(feature)
-                elif 'rel' in feature_lower:
-                    feature_sets['era_normalization'].append(feature)
-                elif 'off_rtg' in stat_name or 'assists_ratio' in stat_name:
-                    feature_sets['offensive_engine'].append(feature)
-                elif 'def_rtg' in stat_name or 'blocks' in stat_name or 'reb_total' in stat_name or 'reb_' in stat_name or 'turnovers' in stat_name:
-                    feature_sets['defensive_engine'].append(feature)
-                elif 'efg' in stat_name or 'ts' in stat_name or 'three' in stat_name:
-                    feature_sets['shooting_efficiency'].append(feature)
-                elif 'points' in stat_name or 'wins' in stat_name:
-                    feature_sets['outcome_strength'].append(feature)
-                elif 'pace' in stat_name or 'std' in feature_lower:
-                    feature_sets['pace_volatility'].append(feature)
-                elif 'b2b' in stat_name or 'travel' in stat_name or 'rest' in feature_lower:
-                    feature_sets['schedule_fatigue'].append(feature)
-                elif 'games_played' in stat_name:
-                    if 'days' in feature_lower or 'diff' in feature_lower:
-                        feature_sets['schedule_fatigue'].append(feature)
-                    else:
-                        feature_sets['sample_size'].append(feature)
-                else:
-                    # Default: put in absolute_magnitude
-                    feature_sets['absolute_magnitude'].append(feature)
-            else:
-                # Old format features - try to categorize
-                if 'Per' in feature or ('per' in feature_lower and 'percent' not in feature_lower):
-                    feature_sets['player_talent'].append(feature)
-                elif 'Inj' in feature or 'inj' in feature_lower:
-                    feature_sets['injuries'].append(feature)
-                elif 'Pace' in feature or 'pace' in feature_lower:
-                    feature_sets['pace_volatility'].append(feature)
-                elif 'B2B' in feature or 'Travel' in feature or 'GamesLast' in feature or 'rest' in feature_lower:
-                    feature_sets['schedule_fatigue'].append(feature)
-                elif 'Rel' in feature or 'rel' in feature_lower:
-                    feature_sets['era_normalization'].append(feature)
-                elif 'Elo' in feature or 'elo' in feature_lower:
-                    feature_sets['elo_strength'].append(feature)
-                elif 'GamesPlayed' in feature:
-                    feature_sets['sample_size'].append(feature)
-                else:
-                    feature_sets['absolute_magnitude'].append(feature)
-        
-        # Convert to regular dict and ensure all expected sets exist (even if empty)
+            group = FeatureGroups.get_group_for_feature(feature)
+            feature_sets[group].append(feature)
+
         feature_sets_dict = dict(feature_sets)
-        
-        # Ensure all expected sets exist (even if empty)
-        expected_sets = [
-            'outcome_strength', 'shooting_efficiency', 'offensive_engine', 
-            'defensive_engine', 'pace_volatility', 'schedule_fatigue', 
-            'sample_size', 'elo_strength', 'era_normalization', 
-            'player_talent', 'absolute_magnitude', 'injuries', 'point_predictions'
-        ]
-        for set_name in expected_sets:
-            if set_name not in feature_sets_dict:
-                feature_sets_dict[set_name] = []
-        
-        # Feature set descriptions
+
+        # Build descriptions from FeatureGroups SSoT
+        all_group_defs = FeatureGroups.get_all_group_definitions()
         feature_set_descriptions = {
-            "outcome_strength": "Highest-level 'scoreboard' signals: points and wins across multiple time windows",
-            "shooting_efficiency": "How efficiently teams turn possessions into points (shot quality & spacing)",
-            "offensive_engine": "Possession-level offensive quality and ball movement (process-oriented metrics)",
-            "defensive_engine": "Prevent opponent scoring / control possessions (defense + possession control)",
-            "pace_volatility": "Tempo (possessions) and consistency (volatility) metrics",
-            "schedule_fatigue": "Short-term fatigue and schedule density (rest, back-to-backs, recent games)",
-            "sample_size": "Data reliability signal (how much information available per team)",
-            "elo_strength": "Single high-signal summary of team strength (meta-feature over other signals)",
-            "era_normalization": "Normalized relative to league average (removes era effects)",
-            "player_talent": "Player-level talent aggregations (PER-based team metrics)",
-            "absolute_magnitude": "Non-differential magnitude features (absolute team performance levels)",
-            "injuries": "Injury impact features (PER value lost, rotation impact, severity)",
-            "point_predictions": "Point prediction model outputs (pred_margin, pred_home_points, pred_away_points, pred_point_total)",
+            name: defn.get("description", "")
+            for name, defn in all_group_defs.items()
         }
+        # Add catch-all groups that FeatureGroups returns but aren't in definitions
+        feature_set_descriptions.setdefault("other", "Uncategorized features")
+        feature_set_descriptions.setdefault("era_normalization", "Normalized relative to league average (removes era effects)")
         
         # Log feature counts per set for debugging
         print(f"[load_features_from_master_csv] Feature counts by set:")
@@ -657,10 +588,6 @@ def _spawn_master_training_job(cmd: list, job_id: str, job_type: str, league=Non
 
 # Use core layer's single source of truth for feature set hash generation
 generate_feature_set_hash = ModelConfigManager.generate_feature_set_hash
-
-
-# Use core layer's single source of truth for config hash generation
-generate_config_hash = ModelConfigManager.generate_config_hash
 
 
 def _parse_training_config(config: dict) -> dict:
@@ -3278,63 +3205,15 @@ def get_game_features(league_id=None):
         # Filter out internal metadata fields (starting with _)
         feature_names = [k for k in features_dict.keys() if not k.startswith('_')]
 
-        # Organize features by category for display
-        # Note: ensemble_outputs removed - base model predictions now shown via ensemble_breakdown
-        feature_categories = {
-            'outcome_strength': [],
-            'shooting_efficiency': [],
-            'offensive_engine': [],
-            'defensive_engine': [],
-            'pace_volatility': [],
-            'schedule_fatigue': [],
-            'sample_size': [],
-            'elo_strength': [],
-            'era_normalization': [],
-            'player_talent': [],
-            'absolute_magnitude': [],
-            'injuries': [],
-            'point_predictions': []
+        # Categorize features via FeatureGroups SSoT
+        from bball.features.groups import FeatureGroups
+        filtered_dict = {
+            name: features_dict.get(name, 0.0)
+            for name in feature_names
+            # Skip ensemble meta-features (shown in ensemble_breakdown section)
+            if not name.startswith(('p_', 'conf_', 'disagree_'))
         }
-
-        # Categorize features
-        for feature_name in feature_names:
-            value = features_dict.get(feature_name, 0.0)
-            feature_lower = feature_name.lower()
-
-            # Skip ensemble meta-features (p_*, conf_*, disagree_*) - shown in ensemble_breakdown section
-            if feature_name.startswith('p_') or feature_name.startswith('conf_') or feature_name.startswith('disagree_'):
-                continue
-
-            if feature_name.startswith('pred_'):
-                feature_categories['point_predictions'].append({'name': feature_name, 'value': value})
-            elif feature_name.startswith('inj_'):
-                # Check injuries FIRST before checking for 'per' (inj_rotation_per contains 'per')
-                feature_categories['injuries'].append({'name': feature_name, 'value': value})
-            elif feature_name.startswith('player_') or 'per' in feature_lower:
-                feature_categories['player_talent'].append({'name': feature_name, 'value': value})
-            elif 'elo' in feature_lower:
-                feature_categories['elo_strength'].append({'name': feature_name, 'value': value})
-            elif 'rel' in feature_lower:
-                feature_categories['era_normalization'].append({'name': feature_name, 'value': value})
-            elif 'wins' in feature_lower or 'points' in feature_lower or 'margin' in feature_lower:
-                feature_categories['outcome_strength'].append({'name': feature_name, 'value': value})
-            elif 'efg' in feature_lower or 'ts' in feature_lower or 'three' in feature_lower:
-                feature_categories['shooting_efficiency'].append({'name': feature_name, 'value': value})
-            elif 'off_rtg' in feature_lower or 'assists_ratio' in feature_lower:
-                feature_categories['offensive_engine'].append({'name': feature_name, 'value': value})
-            elif 'def_rtg' in feature_lower or 'blocks' in feature_lower or 'reb_' in feature_lower or 'turnovers' in feature_lower:
-                feature_categories['defensive_engine'].append({'name': feature_name, 'value': value})
-            elif 'pace' in feature_lower or 'std' in feature_lower or 'volatility' in feature_lower:
-                feature_categories['pace_volatility'].append({'name': feature_name, 'value': value})
-            elif 'rest' in feature_lower or 'b2b' in feature_lower or 'travel' in feature_lower or 'games_last' in feature_lower:
-                feature_categories['schedule_fatigue'].append({'name': feature_name, 'value': value})
-            elif 'games_played' in feature_lower or 'sample_size' in feature_lower:
-                feature_categories['sample_size'].append({'name': feature_name, 'value': value})
-            else:
-                feature_categories['absolute_magnitude'].append({'name': feature_name, 'value': value})
-            
-        # Remove empty categories
-        feature_categories = {k: v for k, v in feature_categories.items() if v}
+        feature_categories = FeatureGroups.categorize_features(filtered_dict)
             
         # Get injured player names from last_prediction
         home_injured_players = last_prediction.get('home_injured_players', [])
@@ -3348,6 +3227,9 @@ def get_game_features(league_id=None):
         if ensemble_breakdown:
             meta_normalized_values = ensemble_breakdown.get('meta_normalized_values', {})
 
+        # Extract home/away companion values for diff meta-features
+        meta_companions = features_dict.get('_meta_companions', {})
+
         return jsonify({
             'success': True,
             'game_id': game_id,
@@ -3360,7 +3242,8 @@ def get_game_features(league_id=None):
             'feature_players': feature_players,  # Player lists for each player feature
             'total_features': len(feature_names),
             'ensemble_breakdown': ensemble_breakdown,  # Base model feature values for ensemble models
-            'meta_normalized_values': meta_normalized_values  # Normalized values for meta-model features
+            'meta_normalized_values': meta_normalized_values,  # Normalized values for meta-model features
+            'meta_companions': meta_companions  # Home/away raw values for diff meta-features
         })
     except Exception as e:
         import traceback
@@ -3974,7 +3857,7 @@ def generate_betting_report_endpoint(league_id=None):
             if trust_doc:
                 bin_trust_weights = trust_doc.get('bins', [])
 
-        from bball.services.betting_report import generate_betting_report
+        from bball.services.betting_report import generate_betting_report, group_parlay_fills
         recommendations = generate_betting_report(
             db, date_str, bankroll, brier_score, g.league, edge_threshold,
             force_include_game_ids, log_loss_score=log_loss_score,
@@ -3982,9 +3865,14 @@ def generate_betting_report_endpoint(league_id=None):
             bin_trust_weights=bin_trust_weights,
         )
 
+        # Group parlay fills if portfolio data was provided
+        portfolio_data = data.get('portfolio_data')
+        parlay_fills = group_parlay_fills(portfolio_data) if portfolio_data else []
+
         return jsonify({
             'success': True,
             'recommendations': [r.to_dict() for r in recommendations],
+            'parlay_fills': parlay_fills,
             'brier_score': brier_score,
             'log_loss': log_loss_score,
             'bankroll': bankroll,
@@ -4234,11 +4122,127 @@ def select_points_model_config(league_id=None):
         }), 500
 
 
+@app.route('/<league_id>/api/model-configs/create', methods=['POST'])
+@app.route('/api/model-configs/create', methods=['POST'])
+def create_model_config(league_id=None):
+    """
+    Create a new model configuration. Always inserts a new document.
+    Used by the model config page's "New Config" modal.
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+        name = data.get('name', '').strip()
+        model_type = data.get('model_type', '')
+        features = data.get('features', [])
+
+        if not name:
+            return jsonify({'success': False, 'error': 'Name is required'}), 400
+        if not model_type:
+            return jsonify({'success': False, 'error': 'Model type is required'}), 400
+        if not features:
+            return jsonify({'success': False, 'error': 'At least one feature is required'}), 400
+
+        # Parse calibration fields
+        use_time_calibration = bool(data.get('use_time_calibration', False))
+        calibration_method = data.get('calibration_method') if use_time_calibration else None
+        begin_year = int(data['begin_year']) if use_time_calibration and data.get('begin_year') else None
+        evaluation_year = int(data['evaluation_year']) if use_time_calibration and data.get('evaluation_year') else None
+        calibration_years = data.get('calibration_years')
+        if use_time_calibration and calibration_years:
+            if isinstance(calibration_years, str):
+                calibration_years = [int(y.strip()) for y in calibration_years.split(',') if y.strip()]
+            elif isinstance(calibration_years, list):
+                calibration_years = [int(y) for y in calibration_years]
+        else:
+            calibration_years = None
+
+        # Parse c_value
+        c_value = None
+        c_values_raw = data.get('c_values', [])
+        if c_values_raw and model_type in C_SUPPORTED_MODELS:
+            try:
+                c_value = float(c_values_raw[0]) if isinstance(c_values_raw, list) else float(c_values_raw)
+            except (ValueError, TypeError, IndexError):
+                c_value = None
+
+        min_games_played = int(data.get('min_games_played', 15))
+        exclude_seasons = data.get('exclude_seasons')
+        if isinstance(exclude_seasons, str):
+            exclude_seasons = [int(y.strip()) for y in exclude_seasons.split(',') if y.strip()] if exclude_seasons.strip() else None
+        elif isinstance(exclude_seasons, list):
+            exclude_seasons = [int(y) for y in exclude_seasons] if exclude_seasons else None
+
+        mgr = ModelConfigManager(db, league=g.league)
+        config_id, config = mgr.create_new_config(
+            name=name,
+            model_type=model_type,
+            features=features,
+            c_value=c_value,
+            use_time_calibration=use_time_calibration,
+            calibration_method=calibration_method,
+            begin_year=begin_year,
+            calibration_years=calibration_years,
+            evaluation_year=evaluation_year,
+            min_games_played=min_games_played,
+            exclude_seasons=exclude_seasons,
+        )
+
+        return jsonify({
+            'success': True,
+            'config_id': config_id,
+            'message': f'Config "{name}" created successfully'
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/<league_id>/api/model-configs/<config_id>/clone', methods=['POST'])
+@app.route('/api/model-configs/<config_id>/clone', methods=['POST'])
+def clone_model_config(config_id, league_id=None):
+    """Clone a model configuration. Creates a new doc with "(copy)" suffix."""
+    try:
+        classifier_config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
+        source = db[classifier_config_collection].find_one({'_id': ObjectId(config_id)})
+        if not source:
+            return jsonify({'success': False, 'error': 'Config not found'}), 404
+
+        # Build clone doc - strip training results and identity fields
+        clone = {k: v for k, v in source.items() if k not in (
+            '_id', 'run_id', 'trained_at', 'accuracy', 'std_dev', 'log_loss',
+            'brier_score', 'auc', 'model_artifact_path', 'scaler_artifact_path',
+            'features_path', 'artifacts_saved_at', 'dataset_id', 'training_csv',
+            'features_ranked', 'features_ranked_by_importance', 'c_values',
+            'best_c_accuracy', 'training_stats', 'selected'
+        )}
+        clone['name'] = (source.get('name', 'Config') + ' (copy)')
+        clone['selected'] = False
+        clone['created_at'] = datetime.utcnow()
+        clone['updated_at'] = datetime.utcnow()
+
+        result = db[classifier_config_collection].insert_one(clone)
+        new_id = str(result.inserted_id)
+
+        return jsonify({
+            'success': True,
+            'config_id': new_id,
+            'message': f'Config cloned as "{clone["name"]}"'
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/<league_id>/api/model-config/save', methods=['POST'])
 @app.route('/api/model-config/save', methods=['POST'])
 def save_model_config(league_id=None):
     """
-    Save model configuration from UI.
+    Save model configuration from UI (legacy, kept for ensemble page backward compat).
     Thin wrapper: parses request, delegates to ModelConfigManager.
     """
     try:
@@ -4306,7 +4310,7 @@ def save_model_config(league_id=None):
                 selected=is_selected,
                 name=existing_name,
             )
-            logger.info(f"Model {model_type}: config_id={config_id}, hash={cfg.get('config_hash', '')[:8]}")
+            logger.info(f"Model {model_type}: config_id={config_id}")
             saved_configs.append({
                 'model_type': model_type,
                 'feature_set_hash': cfg.get('feature_set_hash', ''),
@@ -4511,7 +4515,7 @@ def get_model_config(config_id, league_id=None):
 @app.route('/<league_id>/api/model-configs/<config_id>', methods=['PUT'])
 @app.route('/api/model-configs/<config_id>', methods=['PUT'])
 def update_model_config(config_id, league_id=None):
-    """Update a model configuration."""
+    """Update a model configuration (all fields supported)."""
     try:
         from bball.services.config_manager import ModelConfigManager
 
@@ -4561,6 +4565,32 @@ def update_model_config(config_id, league_id=None):
         if 'include_injuries' in data:
             update_fields['include_injuries'] = bool(data['include_injuries'])
 
+        # Handle calibration settings
+        if 'use_time_calibration' in data:
+            update_fields['use_time_calibration'] = bool(data['use_time_calibration'])
+        if 'calibration_method' in data:
+            update_fields['calibration_method'] = data['calibration_method']
+        if 'begin_year' in data:
+            update_fields['begin_year'] = int(data['begin_year']) if data['begin_year'] is not None else None
+        if 'calibration_years' in data:
+            cal_years = data['calibration_years']
+            if isinstance(cal_years, str):
+                cal_years = [int(y.strip()) for y in cal_years.split(',') if y.strip()]
+            elif isinstance(cal_years, list):
+                cal_years = [int(y) for y in cal_years]
+            update_fields['calibration_years'] = cal_years
+        if 'evaluation_year' in data:
+            update_fields['evaluation_year'] = int(data['evaluation_year']) if data['evaluation_year'] is not None else None
+        if 'min_games_played' in data:
+            update_fields['min_games_played'] = int(data['min_games_played'])
+        if 'exclude_seasons' in data:
+            excl = data['exclude_seasons']
+            if isinstance(excl, str):
+                excl = [int(y.strip()) for y in excl.split(',') if y.strip()] if excl.strip() else None
+            elif isinstance(excl, list):
+                excl = [int(y) for y in excl] if excl else None
+            update_fields['exclude_seasons'] = excl
+
         if not update_fields:
             return jsonify({
                 'success': False,
@@ -4568,29 +4598,6 @@ def update_model_config(config_id, league_id=None):
             }), 400
 
         update_fields['updated_at'] = datetime.utcnow()
-
-        # Recompute config_hash if any hash-relevant fields changed
-        hash_relevant = {'model_type', 'features', 'best_c_value', 'include_injuries'}
-        if hash_relevant & set(data.keys()):
-            current_doc = db[classifier_config_collection].find_one({'_id': ObjectId(config_id)})
-            if current_doc:
-                merged = {**current_doc, **update_fields}
-                fs_hash = merged.get('feature_set_hash') or ModelConfigManager.generate_feature_set_hash(merged.get('features', []))
-                update_fields['config_hash'] = ModelConfigManager.generate_config_hash(
-                    model_type=merged.get('model_type', 'LogisticRegression'),
-                    feature_set_hash=fs_hash,
-                    c_value=merged.get('best_c_value'),
-                    use_time_calibration=merged.get('use_time_calibration', False),
-                    calibration_method=merged.get('calibration_method'),
-                    calibration_years=merged.get('calibration_years'),
-                    begin_year=merged.get('begin_year'),
-                    evaluation_year=merged.get('evaluation_year'),
-                    include_injuries=merged.get('include_injuries', False),
-                    recency_decay_k=merged.get('recency_decay_k'),
-                    use_master=merged.get('use_master', True),
-                    min_games_played=merged.get('min_games_played', 15),
-                    exclude_seasons=merged.get('exclude_seasons'),
-                )
 
         # Update the config
         result = db[classifier_config_collection].update_one(
@@ -4685,23 +4692,10 @@ def get_ensembles(league_id=None):
 def get_available_base_models(league_id=None):
     """Get all trained non-ensemble models available for use in ensembles."""
     try:
-        # Get league-aware collection
-        config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
-
-        # Find trained non-ensemble models (must have trained_at and no ensemble_models field)
-        base_models = list(db[config_collection].find({
-            'trained_at': {'$exists': True},
-            'ensemble_models': {'$exists': False}
-        }))
-
-        # Convert ObjectId to string
-        for model in base_models:
-            model['_id'] = str(model['_id'])
-
-        return jsonify({
-            'success': True,
-            'models': base_models
-        })
+        from bball.services.training_service import TrainingService
+        service = TrainingService(league=g.league, db=db)
+        models = service.list_available_base_models()
+        return jsonify({'success': True, 'models': models})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -4739,40 +4733,16 @@ def get_ensemble(ensemble_id, league_id=None):
 def update_ensemble(ensemble_id, league_id=None):
     """Update an ensemble configuration."""
     try:
-        from bson import ObjectId
-        from datetime import datetime
-        config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
-
         data = request.json
         if not data:
             return jsonify({'success': False, 'error': 'No data provided'}), 400
 
-        # Find existing ensemble
-        existing = db[config_collection].find_one({'_id': ObjectId(ensemble_id)})
-        if not existing:
-            return jsonify({'success': False, 'error': 'Ensemble not found'}), 404
-
-        # Build update document
-        update_fields = {}
-        allowed_fields = ['name', 'ensemble_models', 'ensemble_type', 'ensemble_meta_features',
-                          'ensemble_use_disagree', 'ensemble_use_conf', 'ensemble_use_logit', 'stacking_mode', 'selected',
-                          'model_type', 'best_c_value', 'meta_model_type', 'meta_c_value']
-
-        for field in allowed_fields:
-            if field in data:
-                update_fields[field] = data[field]
-
-        if update_fields:
-            update_fields['updated_at'] = datetime.utcnow()
-            db[config_collection].update_one(
-                {'_id': ObjectId(ensemble_id)},
-                {'$set': update_fields}
-            )
-
-        return jsonify({
-            'success': True,
-            'message': 'Ensemble updated successfully'
-        })
+        from bball.services.training_service import TrainingService
+        service = TrainingService(league=g.league, db=db)
+        result = service.update_ensemble_settings(ensemble_id, data)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 404
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -4784,48 +4754,16 @@ def update_ensemble(ensemble_id, league_id=None):
 def validate_ensemble(league_id=None):
     """Validate ensemble configuration before saving."""
     try:
-        from bson import ObjectId
-        config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
-
         data = request.json
         if not data:
             return jsonify({'success': False, 'error': 'No data provided'}), 400
 
-        ensemble_models = data.get('ensemble_models', [])
-        if len(ensemble_models) < 2:
-            return jsonify({
-                'success': False,
-                'error': 'At least 2 models are required for ensemble'
-            }), 400
-
-        # Validate all models exist and have compatible time configs
-        base_models = []
-        for model_id in ensemble_models:
-            model = db[config_collection].find_one({'_id': ObjectId(model_id)})
-            if not model:
-                return jsonify({
-                    'success': False,
-                    'error': f'Model {model_id} not found'
-                }), 404
-            if model.get('ensemble_models'):
-                return jsonify({
-                    'success': False,
-                    'error': 'Cannot include ensemble model in another ensemble'
-                }), 400
-            base_models.append(model)
-
-        # Validate time configs match
-        if base_models:
-            ref = base_models[0]
-            for model in base_models[1:]:
-                for key in ['begin_year', 'calibration_years', 'evaluation_year']:
-                    if model.get(key) != ref.get(key):
-                        return jsonify({
-                            'success': False,
-                            'error': f'Time config mismatch: {key} differs between models'
-                        }), 400
-
+        from bball.services.training_service import TrainingService
+        service = TrainingService(league=g.league, db=db)
+        service.validate_ensemble_models(data.get('ensemble_models', []))
         return jsonify({'success': True, 'message': 'Validation passed'})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -4835,51 +4773,139 @@ def validate_ensemble(league_id=None):
 @app.route('/<league_id>/api/ensembles/<ensemble_id>/retrain-meta', methods=['POST'])
 @app.route('/api/ensembles/<ensemble_id>/retrain-meta', methods=['POST'])
 def retrain_ensemble_meta(ensemble_id, league_id=None):
-    """Retrain the meta-model for an ensemble."""
+    """Retrain the meta-model for an ensemble (saves settings first, then trains in bg)."""
     try:
         from bson import ObjectId
-        config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
+        from bball.services.training_service import TrainingService
+        from bball.services.jobs import create_job, update_job_progress, complete_job, fail_job
 
+        config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
         ensemble = db[config_collection].find_one({'_id': ObjectId(ensemble_id)})
         if not ensemble:
             return jsonify({'success': False, 'error': 'Ensemble not found'}), 404
-
         if not ensemble.get('ensemble_models'):
             return jsonify({'success': False, 'error': 'Not an ensemble configuration'}), 400
 
-        # Get updated meta-feature settings from request
+        # Merge request overrides with DB values
         data = request.json or {}
+        ensemble_models = data.get('ensemble_models', ensemble.get('ensemble_models', []))
         ensemble_meta_features = data.get('ensemble_meta_features', ensemble.get('ensemble_meta_features', []))
         ensemble_use_disagree = data.get('ensemble_use_disagree', ensemble.get('ensemble_use_disagree', False))
         ensemble_use_conf = data.get('ensemble_use_conf', ensemble.get('ensemble_use_conf', False))
         ensemble_use_logit = data.get('ensemble_use_logit', ensemble.get('ensemble_use_logit', False))
         meta_model_type = data.get('meta_model_type', ensemble.get('model_type', 'LogisticRegression'))
+        meta_c_value = data.get('meta_c_value') or data.get('best_c_value') or ensemble.get('best_c_value', 0.1)
+        stacking_mode = data.get('stacking_mode', ensemble.get('stacking_mode', 'naive'))
+        ensemble_name = data.get('name') or ensemble.get('name')
+        try:
+            meta_c_value = float(meta_c_value)
+        except (TypeError, ValueError):
+            meta_c_value = 0.1
 
-        # Persist the updated flags to DB
-        db[config_collection].update_one(
-            {'_id': ObjectId(ensemble_id)},
-            {'$set': {
-                'ensemble_meta_features': ensemble_meta_features,
-                'ensemble_use_disagree': ensemble_use_disagree,
-                'ensemble_use_conf': ensemble_use_conf,
-                'ensemble_use_logit': ensemble_use_logit,
-                'model_type': meta_model_type,
-            }}
-        )
+        # Meta-model calibration params
+        meta_calibration_method = data.get('meta_calibration_method') or ensemble.get('meta_calibration_method') or None
+        meta_train_years = data.get('meta_train_years') or ensemble.get('meta_train_years') or None
+        meta_calibration_years_val = data.get('meta_calibration_years') or ensemble.get('meta_calibration_years') or None
+        meta_evaluation_year_val = data.get('meta_evaluation_year') or ensemble.get('meta_evaluation_year') or None
 
-        # Build config dict and route to train_ensemble_model()
-        train_config = {
-            'ensemble': True,
-            'ensemble_models': ensemble.get('ensemble_models', []),
+        # Parse comma-separated strings into int lists if needed
+        def _parse_year_list(val):
+            if val is None:
+                return None
+            if isinstance(val, list):
+                return [int(y) for y in val]
+            if isinstance(val, str):
+                return [int(y.strip()) for y in val.split(',') if y.strip()]
+            return None
+
+        meta_train_years = _parse_year_list(meta_train_years)
+        meta_calibration_years_val = _parse_year_list(meta_calibration_years_val)
+        try:
+            meta_evaluation_year_val = int(meta_evaluation_year_val) if meta_evaluation_year_val else None
+        except (TypeError, ValueError):
+            meta_evaluation_year_val = None
+
+        # If calibration method is empty/None, clear all meta cal fields
+        if not meta_calibration_method:
+            meta_calibration_method = None
+            meta_train_years = None
+            meta_calibration_years_val = None
+            meta_evaluation_year_val = None
+
+        # Persist updated fields
+        service = TrainingService(league=g.league, db=db)
+        settings = {
+            'ensemble_models': ensemble_models,
             'ensemble_meta_features': ensemble_meta_features,
             'ensemble_use_disagree': ensemble_use_disagree,
             'ensemble_use_conf': ensemble_use_conf,
             'ensemble_use_logit': ensemble_use_logit,
-            'model_types': [meta_model_type],
-            'c_values': [ensemble.get('best_c_value', 0.1)],
+            'model_type': meta_model_type,
+            'best_c_value': meta_c_value,
+            'stacking_mode': stacking_mode,
+            'meta_calibration_method': meta_calibration_method,
+            'meta_train_years': meta_train_years,
+            'meta_calibration_years': meta_calibration_years_val,
+            'meta_evaluation_year': meta_evaluation_year_val,
         }
+        if ensemble_name:
+            settings['name'] = ensemble_name
+        service.update_ensemble_settings(ensemble_id, settings)
 
-        return train_ensemble_model(train_config, classifier_config_collection=config_collection, league=g.league)
+        # String-ify ensemble_models for train_ensemble
+        base_ids = [str(m) if not isinstance(m, str) else m for m in ensemble_models]
+        league = g.league
+        league_id_str = league.league_id if league else 'nba'
+
+        job_id = create_job('train', league=league, config_id=ensemble_id)
+
+        def _run(job_id, ens_id, base_ids, meta_model_type, meta_c_value, stacking_mode,
+                 ensemble_meta_features, ensemble_use_disagree, ensemble_use_conf,
+                 ensemble_use_logit, league_id, ens_name,
+                 meta_cal_method, meta_train_yrs, meta_cal_yrs, meta_eval_yr):
+            from bball.league_config import load_league_config
+            from bball.mongo import Mongo
+            import traceback as tb
+            try:
+                league_config = load_league_config(league_id)
+                bg_db = Mongo().db
+                svc = TrainingService(league=league_config, db=bg_db)
+                svc.train_ensemble(
+                    meta_model_type=meta_model_type,
+                    base_model_names_or_ids=base_ids,
+                    meta_c_value=meta_c_value,
+                    extra_features=ensemble_meta_features or None,
+                    stacking_mode=stacking_mode,
+                    use_disagree=ensemble_use_disagree,
+                    use_conf=ensemble_use_conf,
+                    use_logit=ensemble_use_logit,
+                    name=ens_name,
+                    ensemble_id=ens_id,
+                    meta_calibration_method=meta_cal_method,
+                    meta_train_years=meta_train_yrs,
+                    meta_calibration_years=meta_cal_yrs,
+                    meta_evaluation_year=meta_eval_yr,
+                )
+                complete_job(job_id, 'Meta-model retrained successfully', league=league_config)
+            except Exception as e:
+                tb.print_exc()
+                try:
+                    league_config = load_league_config(league_id)
+                    fail_job(job_id, str(e), f'Retrain failed: {str(e)}', league=league_config)
+                except Exception:
+                    pass
+
+        thread = threading.Thread(
+            target=_run,
+            args=(job_id, ensemble_id, base_ids, meta_model_type, meta_c_value, stacking_mode,
+                  ensemble_meta_features, ensemble_use_disagree, ensemble_use_conf,
+                  ensemble_use_logit, league_id_str, ensemble_name,
+                  meta_calibration_method, meta_train_years, meta_calibration_years_val, meta_evaluation_year_val),
+            daemon=True,
+        )
+        thread.start()
+
+        return jsonify({'success': True, 'job_id': job_id})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -4893,17 +4919,6 @@ def retrain_ensemble_base(ensemble_id, base_model_id, league_id=None):
     from bball.services.jobs import create_job, update_job_progress, complete_job, fail_job
 
     try:
-        from bson import ObjectId
-        config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
-
-        ensemble = db[config_collection].find_one({'_id': ObjectId(ensemble_id)})
-        if not ensemble:
-            return jsonify({'success': False, 'error': 'Ensemble not found'}), 404
-
-        ensemble_models = ensemble.get('ensemble_models', [])
-        if base_model_id not in [str(m) for m in ensemble_models]:
-            return jsonify({'success': False, 'error': 'Base model not part of this ensemble'}), 400
-
         league = g.league
         league_id_str = league.league_id if league else 'nba'
 
@@ -4913,8 +4928,33 @@ def retrain_ensemble_base(ensemble_id, base_model_id, league_id=None):
             metadata={'ensemble_id': ensemble_id, 'base_model_id': base_model_id, 'league': league_id_str}
         )
 
+        def _run(job_id, ensemble_id, base_model_id, league_id):
+            from bball.league_config import load_league_config
+            from bball.services.training_service import TrainingService
+            from bball.mongo import Mongo
+            import traceback as tb
+
+            try:
+                league_config = load_league_config(league_id)
+                bg_db = Mongo().db
+                service = TrainingService(league=league_config, db=bg_db)
+                service.retrain_base_model(
+                    ensemble_id=ensemble_id,
+                    base_model_id=base_model_id,
+                    retrain_meta=True,
+                    progress_callback=lambda pct, msg: update_job_progress(job_id, pct, msg, league=league_config),
+                )
+                complete_job(job_id, 'Base model retrained and ensemble meta-model updated', league=league_config)
+            except Exception as e:
+                tb.print_exc()
+                try:
+                    league_config = load_league_config(league_id)
+                    fail_job(job_id, str(e), f'Retrain failed: {str(e)}', league=league_config)
+                except Exception:
+                    pass
+
         thread = threading.Thread(
-            target=_run_retrain_base_job,
+            target=_run,
             args=(job_id, ensemble_id, base_model_id, league_id_str),
             daemon=True,
         )
@@ -4925,133 +4965,6 @@ def retrain_ensemble_base(ensemble_id, base_model_id, league_id=None):
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
-
-
-def _run_retrain_base_job(job_id, ensemble_id, base_model_id, league_id):
-    """Background job: retrain a base model then retrain the ensemble meta-model."""
-    from bball.league_config import load_league_config
-    from bball.services.config_manager import ModelConfigManager
-    from bball.services.training_service import TrainingService
-    from bball.training.experiment_runner import ExperimentRunner
-    from bball.mongo import Mongo
-    from bball.services.jobs import update_job_progress, complete_job, fail_job
-    import traceback as tb
-    import uuid
-
-    try:
-        league_config = load_league_config(league_id)
-        bg_db = Mongo().db
-        config_collection = league_config.collections.get('model_config_classifier', 'nba_model_config')
-
-        update_job_progress(job_id, 5, 'Loading base model config...', league=league_config)
-
-        # 1. Load base model config
-        base_config = bg_db[config_collection].find_one({'_id': ObjectId(base_model_id)})
-        if not base_config:
-            fail_job(job_id, 'Base model config not found', league=league_config)
-            return
-
-        update_job_progress(job_id, 10, 'Building experiment config...', league=league_config)
-
-        # 2. Build experiment config from the base model's fields
-        model_type = base_config.get('model_type', 'LogisticRegression')
-        c_value = base_config.get('best_c_value')
-        features = base_config.get('features', [])
-
-        experiment_config = {
-            'task': 'binary_home_win',
-            'model': {
-                'type': model_type,
-            },
-            'features': {
-                'features': features,
-            },
-            'splits': {
-                'type': 'year_based_calibration',
-                'begin_year': base_config.get('begin_year', 2012),
-                'calibration_years': base_config.get('calibration_years', [2023]),
-                'evaluation_year': base_config.get('evaluation_year', 2024),
-                'min_games_played': base_config.get('min_games_played', 15),
-                'exclude_seasons': base_config.get('exclude_seasons'),
-            },
-            'use_time_calibration': base_config.get('use_time_calibration', True),
-            'calibration_method': base_config.get('calibration_method', 'sigmoid'),
-        }
-
-        if c_value is not None and model_type in ('LogisticRegression', 'SVM'):
-            experiment_config['model']['c_value'] = c_value
-
-        update_job_progress(job_id, 20, 'Running experiment (training base model)...', league=league_config)
-
-        # 3. Run experiment
-        runner = ExperimentRunner(db=bg_db, league=league_config)
-        session_id = f"retrain-base-{uuid.uuid4().hex[:8]}"
-        result = runner.run_experiment(experiment_config, session_id)
-
-        update_job_progress(job_id, 60, 'Linking results to config...', league=league_config)
-
-        # 4. Build training_stats from metrics (same pattern as TrainingService.train_base_model)
-        diagnostics = result.get('diagnostics', {})
-        metrics = result.get('metrics', {})
-        training_stats = {
-            'total_games': diagnostics.get('n_samples', 0),
-            'train_games': metrics.get('train_set_size'),
-            'calibration_games': metrics.get('calibrate_set_size'),
-            'eval_games': metrics.get('eval_set_size'),
-        }
-
-        # Link results to the same config_id
-        config_mgr = ModelConfigManager(db=bg_db, league=league_config)
-        config_mgr.link_run_to_config(
-            config_id=base_model_id,
-            run_id=result['run_id'],
-            config_type='classifier',
-            metrics=result.get('metrics'),
-            artifacts=result.get('artifacts'),
-            dataset_id=result.get('dataset_id'),
-            f_scores=diagnostics.get('f_scores'),
-            feature_importances=diagnostics.get('feature_importances'),
-            features=features,
-            best_c_value=diagnostics.get('best_c_value', c_value),
-            training_stats=training_stats,
-        )
-
-        update_job_progress(job_id, 70, 'Retraining ensemble meta-model...', league=league_config)
-
-        # 5. Retrain ensemble meta-model
-        ensemble_doc = bg_db[config_collection].find_one({'_id': ObjectId(ensemble_id)})
-        if ensemble_doc:
-            service = TrainingService(league=league_config, db=bg_db)
-            base_ids = [str(m) for m in ensemble_doc.get('ensemble_models', [])]
-            meta_type = ensemble_doc.get('model_type', 'LogisticRegression')
-            meta_c = ensemble_doc.get('best_c_value', 0.1)
-            stacking_mode = ensemble_doc.get('stacking_mode', 'naive')
-            use_disagree = ensemble_doc.get('ensemble_use_disagree', False)
-            use_conf = ensemble_doc.get('ensemble_use_conf', False)
-            use_logit = ensemble_doc.get('ensemble_use_logit', False)
-            extra_features = ensemble_doc.get('ensemble_meta_features') or None
-
-            service.train_ensemble(
-                meta_model_type=meta_type,
-                base_model_names_or_ids=base_ids,
-                meta_c_value=meta_c if meta_c else 0.1,
-                extra_features=extra_features,
-                stacking_mode=stacking_mode,
-                use_disagree=use_disagree,
-                use_conf=use_conf,
-                use_logit=use_logit,
-            )
-
-        update_job_progress(job_id, 95, 'Finishing up...', league=league_config)
-        complete_job(job_id, 'Base model retrained and ensemble meta-model updated', league=league_config)
-
-    except Exception as e:
-        tb.print_exc()
-        try:
-            league_config = load_league_config(league_id)
-            fail_job(job_id, str(e), f'Retrain failed: {str(e)}', league=league_config)
-        except Exception:
-            pass
 
 
 @app.route('/<league_id>/api/ensembles/<ensemble_id>/update-calibration', methods=['POST'])
@@ -5131,198 +5044,43 @@ def update_ensemble_calibration(ensemble_id, league_id=None):
 @app.route('/<league_id>/api/model-configs/create-ensemble', methods=['POST'])
 @app.route('/api/model-configs/create-ensemble', methods=['POST'])
 def create_ensemble(league_id=None):
-    """Create an ensemble model configuration."""
+    """Create an ensemble model configuration (save draft, no training)."""
     try:
-        from bson import ObjectId
-        import logging
-        logger = logging.getLogger(__name__)
-        classifier_config_collection = g.league.collections.get('model_config_classifier', 'nba_model_config')
-
         data = request.json
         if not data:
-            return jsonify({
-                'success': False,
-                'error': 'No data provided'
-            }), 400
-        
-        ensemble_models = data.get('ensemble_models', [])
-        ensemble_type = data.get('ensemble_type', 'stacking')
-        ensemble_meta_features = data.get('ensemble_meta_features', [])  # Custom features from user
-        ensemble_use_disagree = data.get('ensemble_use_disagree', False)
-        ensemble_use_conf = data.get('ensemble_use_conf', False)
-        ensemble_use_logit = data.get('ensemble_use_logit', False)
-        
-        if len(ensemble_models) < 2:
-            return jsonify({
-                'success': False,
-                'error': 'At least 2 models are required for ensemble'
-            }), 400
-        
-        # Validate that all ensemble models exist
-        base_models = []
-        for model_id in ensemble_models:
-            model_config = db[classifier_config_collection].find_one({'_id': ObjectId(model_id)})
-            if not model_config:
-                return jsonify({
-                    'success': False,
-                    'error': f'Model config {model_id} not found'
-                }), 404
-            # Skip ensemble configs to avoid nesting
-            if model_config.get('ensemble', False):
-                return jsonify({
-                    'success': False,
-                    'error': f'Cannot include ensemble model {model_id} in another ensemble'
-                }), 400
-            base_models.append(model_config)
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
 
-        # Rule 1: Validate base model time configs match (comprehensive validation)
-        ref_config = base_models[0]
-        required_time_keys = ['use_time_calibration', 'begin_year', 'calibration_years', 'evaluation_year']
-        
-        # Validate reference config has all required time settings
-        missing_keys = [key for key in required_time_keys if key not in ref_config]
-        if missing_keys:
-            return jsonify({
-                'success': False,
-                'error': f'Reference model missing required time settings: {missing_keys}'
-            }), 400
-        
-        # Validate reference config has time calibration enabled
-        if not ref_config.get('use_time_calibration', False):
-            return jsonify({
-                'success': False,
-                'error': 'All base models must have time-based calibration enabled for ensemble creation'
-            }), 400
-        
-        time_config = {
-            'use_time_calibration': ref_config['use_time_calibration'],
-            'begin_year': ref_config['begin_year'],
-            'calibration_years': ref_config['calibration_years'],
-            'evaluation_year': ref_config['evaluation_year'],
-            'calibration_method': ref_config.get('calibration_method'),
-            'exclude_seasons': ref_config.get('exclude_seasons'),
-        }
-        
-        # Validate all base models have identical time configs
-        for i, model in enumerate(base_models[1:], 1):
-            model_name = model.get('name', f'Model {i+1}')
-            
-            # Check time calibration is enabled
-            if not model.get('use_time_calibration', False):
-                return jsonify({
-                    'success': False,
-                    'error': f'Model "{model_name}" does not have time-based calibration enabled. All base models must have use_time_calibration=True'
-                }), 400
-            
-            # Check each time setting matches
-            mismatches = []
-            for key in required_time_keys:
-                if model.get(key) != time_config[key]:
-                    mismatches.append(f'{key}: expected {time_config[key]}, got {model.get(key)}')
-            
-            if mismatches:
-                error_msg = f'Time configuration mismatch in model "{model_name}":\n' + '\n'.join(mismatches)
-                return jsonify({
-                    'success': False,
-                    'error': error_msg + '\n\nAll base models must have identical time-based calibration settings.'
-                }), 400
-        
-        # Rule 2 & 3: Meta config construction with max min_games_played
-        # Rule 2: Meta-model time config = base model time config (by default)
-        # Rule 3: Meta-model min_games_played = max(min_games_played across all base models)
-        min_games_played_values = []
-        for model in base_models:
-            min_games = model.get('min_games_played', 0)
-            if min_games is None:
-                min_games = 0
-            min_games_played_values.append(min_games)
-        
-        meta_min_games_played = max(min_games_played_values) if min_games_played_values else 0
-        
-        # Create ensemble config document
-        ensemble_config = {
-            'ensemble': True,
-            'ensemble_type': ensemble_type,
-            'ensemble_models': ensemble_models,
-            'ensemble_meta_features': ensemble_meta_features,
-            'ensemble_use_disagree': ensemble_use_disagree,
-            'ensemble_use_conf': ensemble_use_conf,
-            'ensemble_use_logit': ensemble_use_logit,
-            'model_type': data.get('meta_model_type', 'LogisticRegression'),
-            'best_c_value': float(data.get('meta_c_value', 0.1)) if data.get('meta_c_value') else None,
-            'features': [],  # Ensembles don't have traditional features
-            'feature_count': 0,
-            'name': f'Ensemble ({len(ensemble_models)} models)',
-            'selected': False,  # Don't auto-select ensembles
-            'use_master': True,  # Ensembles always use master training data
-            # Rule 2: Meta time config = base model time config
-            'use_time_calibration': time_config['use_time_calibration'],
-            'begin_year': time_config['begin_year'],
-            'calibration_years': time_config['calibration_years'],
-            'evaluation_year': time_config['evaluation_year'],
-            'calibration_method': time_config['calibration_method'],
-            'exclude_seasons': time_config['exclude_seasons'],
-            # Rule 3: Meta min_games_played = max across base models
-            'min_games_played': meta_min_games_played,
-            'include_injuries': False,  # Default, can be overridden
-            'trained_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow(),
-            'config_hash': f'ensemble_{generate_feature_set_hash(sorted(ensemble_models))}'  # Deterministic hash
-        }
+        from bball.services.training_service import TrainingService
+        service = TrainingService(league=g.league, db=db)
 
-        # Check for existing ensemble config first
-        # First try to find by config_hash, then fallback to matching ensemble_models
-        existing_ensemble = db[classifier_config_collection].find_one({'config_hash': ensemble_config['config_hash']})
-        if not existing_ensemble:
-            # Fallback: find by ensemble_models (handles old hash format)
-            existing_ensemble = db[classifier_config_collection].find_one({
-                'ensemble': True,
-                'ensemble_models': ensemble_models
-            })
-            if existing_ensemble:
-                # Update the old config's hash to the new format
-                db[classifier_config_collection].update_one(
-                    {'_id': existing_ensemble['_id']},
-                    {'$set': {'config_hash': ensemble_config['config_hash']}}
-                )
-                logger.info(f"Updated old ensemble config hash to new format: {existing_ensemble['_id']}")
-        if existing_ensemble:
-            ensemble_id = str(existing_ensemble['_id'])
-            # Update existing config with current meta-feature settings
-            db[classifier_config_collection].update_one(
-                {'_id': existing_ensemble['_id']},
-                {'$set': {
-                    'updated_at': datetime.utcnow(),
-                    'ensemble_meta_features': ensemble_meta_features,
-                    'ensemble_use_disagree': ensemble_use_disagree,
-                    'ensemble_use_conf': ensemble_use_conf,
-                    'ensemble_use_logit': ensemble_use_logit,
-                }}
-            )
-            logger.info(f"Found existing ensemble {ensemble_id} with {len(ensemble_models)} base models")
-        else:
-            # Insert new ensemble config
-            result = db[classifier_config_collection].insert_one(ensemble_config)
-            ensemble_id = str(result.inserted_id)
-            logger.info(f"Created ensemble {ensemble_id} with {len(ensemble_models)} base models")
+        meta_c_value = data.get('meta_c_value')
+        if meta_c_value is not None:
+            try:
+                meta_c_value = float(meta_c_value)
+            except (TypeError, ValueError):
+                meta_c_value = 0.1
 
-        if ensemble_id:
-            
-            # TODO: Integrate with modeler agent stacking tool
-            # For now, ensemble is created but not trained
-            # Training will happen when ensemble is selected for prediction
-            
-            return jsonify({
-                'success': True,
-                'ensemble_id': ensemble_id,
-                'message': f'Ensemble created with {len(ensemble_models)} base models'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Failed to create ensemble'
-            }), 500
-            
+        result = service.create_ensemble_config(
+            base_model_ids=data.get('ensemble_models', []),
+            meta_model_type=data.get('meta_model_type', 'LogisticRegression'),
+            meta_c_value=meta_c_value,
+            stacking_mode=data.get('stacking_mode', 'naive'),
+            ensemble_meta_features=data.get('ensemble_meta_features', []),
+            ensemble_use_disagree=data.get('ensemble_use_disagree', False),
+            ensemble_use_conf=data.get('ensemble_use_conf', False),
+            ensemble_use_logit=data.get('ensemble_use_logit', False),
+            name=data.get('name'),
+        )
+
+        n_models = len(data.get('ensemble_models', []))
+        return jsonify({
+            'success': True,
+            'ensemble_id': result['ensemble_id'],
+            'is_new': result['is_new'],
+            'message': f'Ensemble {"created" if result["is_new"] else "updated"} with {n_models} base models',
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -5934,8 +5692,114 @@ def master_training_regenerate_full(league_id=None):
         }), 500
 
 
+def run_training_job_by_config_id(job_id, config_id, league):
+    """Train a specific config by its _id, always rebuilding dataset fresh from master CSV."""
+    from bball.services.jobs import update_job_progress, complete_job, fail_job
+
+    try:
+        update_job_progress(job_id, 1, 'Loading config...', league=league)
+
+        from bson import ObjectId
+        from bball.mongo import Mongo
+        from bball.services.training_service import TrainingService
+        from bball.services.config_manager import ModelConfigManager
+
+        db_inst = Mongo().db
+        classifier_col = league.collections.get('model_config_classifier', 'nba_model_config')
+        config_doc = db_inst[classifier_col].find_one({'_id': ObjectId(config_id)})
+
+        if not config_doc:
+            fail_job(job_id, f'Config {config_id} not found', league=league)
+            return
+
+        # Ensemble configs must go through the ensemble training flow
+        if config_doc.get('ensemble') or config_doc.get('ensemble_models'):
+            update_job_progress(job_id, 5, 'Detected ensemble config, routing to ensemble training...', league=league)
+            service = TrainingService(league=league, db=db_inst)
+            base_ids = [str(m) for m in config_doc.get('ensemble_models', [])]
+            service.train_ensemble(
+                meta_model_type=config_doc.get('model_type', 'LogisticRegression'),
+                base_model_names_or_ids=base_ids,
+                meta_c_value=config_doc.get('best_c_value', 0.1) or 0.1,
+                extra_features=config_doc.get('ensemble_meta_features') or None,
+                stacking_mode=config_doc.get('stacking_mode', 'naive'),
+                use_disagree=config_doc.get('ensemble_use_disagree', False),
+                use_conf=config_doc.get('ensemble_use_conf', False),
+                use_logit=config_doc.get('ensemble_use_logit', False),
+                name=config_doc.get('name'),
+                ensemble_id=config_id,
+            )
+            complete_job(job_id, 'Ensemble training completed.', league=league)
+            return
+
+        service = TrainingService(league=league, db=db_inst)
+
+        def progress_cb(pct, msg):
+            update_job_progress(job_id, pct, msg, league=league)
+
+        model_type = config_doc.get('model_type', 'LogisticRegression')
+        features = config_doc.get('features', [])
+        c_value = config_doc.get('best_c_value', 0.1)
+        use_time_calibration = config_doc.get('use_time_calibration', False)
+        calibration_method = config_doc.get('calibration_method', 'isotonic')
+        begin_year = config_doc.get('begin_year') or 2012
+        calibration_years = config_doc.get('calibration_years')
+        evaluation_year = config_doc.get('evaluation_year')
+        min_games_played = config_doc.get('min_games_played', 15)
+        exclude_seasons = config_doc.get('exclude_seasons')
+        name = config_doc.get('name')
+
+        # Build c_values list for grid
+        from bball.training.constants import C_SUPPORTED_MODELS
+        if model_type in C_SUPPORTED_MODELS:
+            c_values = [c_value] if c_value is not None else [0.1]
+        else:
+            c_values = []
+
+        update_job_progress(job_id, 5, f'Training {model_type} (force_rebuild=True)...', league=league)
+
+        result = service.train_model_grid(
+            model_types=[model_type],
+            c_values=c_values,
+            features=features,
+            use_time_calibration=use_time_calibration,
+            calibration_method=calibration_method,
+            begin_year=begin_year,
+            calibration_years=calibration_years,
+            evaluation_year=evaluation_year,
+            min_games_played=min_games_played,
+            include_injuries=config_doc.get('include_injuries', False),
+            exclude_seasons=exclude_seasons,
+            use_master=True,
+            name_prefix=name,
+            progress_callback=progress_cb,
+            force_rebuild=True,
+        )
+
+        # Link training results back to the SAME config doc (not whatever hash-based upsert created)
+        saved_ids = result.get('saved_config_ids', [])
+        model_type_results = result.get('model_type_results', {})
+
+        if model_type_results and model_type in model_type_results:
+            best = model_type_results[model_type].get('best')
+            if best:
+                # Copy training results from the auto-created config to our config
+                auto_config_id = best.get('config_id')
+                if auto_config_id and auto_config_id != config_id:
+                    mgr = ModelConfigManager(db_inst, league=league)
+                    mgr.absorb_duplicate_config(config_id, auto_config_id)
+
+        complete_job(job_id, 'Training completed.', league=league)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        from bball.services.jobs import fail_job
+        fail_job(job_id, str(e), f'Training failed: {str(e)}', league=league)
+
+
 def run_training_job(job_id, parsed_config, league):
-    """Thin wrapper: delegates training to core TrainingService."""
+    """Thin wrapper: delegates training to core TrainingService (legacy grid mode)."""
     from bball.services.jobs import update_job_progress, complete_job, fail_job
 
     try:
@@ -5948,18 +5812,25 @@ def run_training_job(job_id, parsed_config, league):
         def progress_cb(pct, msg):
             update_job_progress(job_id, pct, msg, league=league)
 
-        # When retraining a selected model, preserve its name
+        from bson import ObjectId
+        from bball.mongo import Mongo
+        from bball.services.config_manager import ModelConfigManager
+
+        # When retraining a selected model, preserve its name only if model type
+        # hasn't changed — otherwise let auto-naming generate a correct name.
         name_prefix = None
         config_id = parsed_config.get('config_id')
         if config_id:
-            from bson import ObjectId
-            from bball.mongo import Mongo
             classifier_col = league.collections.get('model_config_classifier', 'nba_model_config')
             existing = Mongo().db[classifier_col].find_one(
-                {'_id': ObjectId(config_id)}, {'name': 1}
+                {'_id': ObjectId(config_id)}, {'name': 1, 'model_type': 1}
             )
             if existing and existing.get('name'):
-                name_prefix = existing['name']
+                existing_type = existing.get('model_type')
+                new_types = parsed_config['model_types']
+                # Only preserve name when retraining the same model type
+                if existing_type and len(new_types) == 1 and new_types[0] == existing_type:
+                    name_prefix = existing['name']
 
         result = service.train_model_grid(
             model_types=parsed_config['model_types'],
@@ -5978,7 +5849,13 @@ def run_training_job(job_id, parsed_config, league):
             progress_callback=progress_cb,
         )
 
-        n_saved = len(result.get('saved_config_ids', []))
+        # Select the newly trained config(s) so the UI reflects the latest run
+        saved_ids = result.get('saved_config_ids', [])
+        if saved_ids:
+            mgr = ModelConfigManager(Mongo().db, league=league)
+            mgr.set_selected_config(saved_ids[-1])
+
+        n_saved = len(saved_ids)
         complete_job(job_id, f'Training completed. Saved {n_saved} model configuration(s).', league=league)
 
     except Exception as e:
@@ -5993,7 +5870,9 @@ def run_training_job(job_id, parsed_config, league):
 def train_model_config(league_id=None):
     """
     Start training job asynchronously.
-    Thin wrapper: parses request, creates placeholder config via core, spawns job.
+    Supports two modes:
+    1. config_id mode (new): loads config from DB, always force_rebuild=True
+    2. Legacy mode: parses form data, spawns grid training
     Returns job_id immediately for polling.
     """
     import logging
@@ -6012,6 +5891,26 @@ def train_model_config(league_id=None):
             classifier_config_collection = league.collections.get('model_config_classifier', 'nba_model_config')
             return train_ensemble_model(config, classifier_config_collection=classifier_config_collection, league=league)
 
+        # New config_id mode: train a specific config by ID (from model config page)
+        config_id = config.get('config_id')
+        if config_id and not config.get('model_types'):
+            logger.info(f"Training by config_id: {config_id} (force_rebuild=True)")
+            job_id = create_job('train', league=league)
+
+            training_thread = threading.Thread(
+                target=run_training_job_by_config_id,
+                args=(job_id, config_id, league),
+                daemon=True
+            )
+            training_thread.start()
+
+            return jsonify({
+                'success': True,
+                'job_id': job_id,
+                'message': 'Training job started (fresh dataset rebuild)'
+            })
+
+        # Legacy mode: parse form data for grid training
         parsed = _parse_training_config(config)
         # Override model_types/c_values defaults for training
         if not parsed['model_types']:
@@ -6050,317 +5949,94 @@ def train_model_config(league_id=None):
 
 def train_ensemble_model(config, classifier_config_collection: str = 'nba_model_config', league=None):
     """
-    Train ensemble meta-model using stacking trainer.
+    Train ensemble meta-model using TrainingService.
 
     Args:
         config: Dictionary containing ensemble training configuration
-        classifier_config_collection: League-aware collection name
+        classifier_config_collection: League-aware collection name (unused, kept for compat)
+        league: LeagueConfig instance
 
     Returns:
         JSON response with job_id for async training
     """
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    
     try:
-        # Extract ensemble configuration
+        from bball.services.training_service import TrainingService
+
         ensemble_models = config.get('ensemble_models', [])
         ensemble_meta_features = config.get('ensemble_meta_features', [])
         ensemble_use_disagree = config.get('ensemble_use_disagree', False)
         ensemble_use_conf = config.get('ensemble_use_conf', False)
         ensemble_use_logit = config.get('ensemble_use_logit', False)
-        
-        # Get meta-model type from selected model types (use first one)
+        stacking_mode = config.get('stacking_mode')
+
         model_types = config.get('model_types', ['LogisticRegression'])
         meta_model_type = model_types[0] if model_types else 'LogisticRegression'
-        
-        # Get meta C-value if applicable
+
         c_values = config.get('c_values', [0.1])
         meta_c_value = c_values[0] if c_values else 0.1
-        
-        logger.info(f"Training ensemble meta-model: {meta_model_type}")
-        logger.info(f"Base models: {ensemble_models}")
-        logger.info(f"Meta features: {ensemble_meta_features}")
-        logger.info(f"Use disagree: {ensemble_use_disagree}, Use conf: {ensemble_use_conf}, Use logit: {ensemble_use_logit}")
-        
-        # Validate ensemble models exist
-        from bson import ObjectId
-        base_models = []
-        for model_id in ensemble_models:
-            model_config = db[classifier_config_collection].find_one({'_id': ObjectId(model_id)})
-            if not model_config:
-                return jsonify({
-                    'success': False,
-                    'error': f'Model config {model_id} not found'
-                }), 404
-            base_models.append(model_config)
 
-        # Get time-based calibration config from first base model
-        ref_config = base_models[0]
+        # Infer stacking_mode if not explicitly set
+        if not stacking_mode:
+            use_any_meta = ensemble_use_disagree or ensemble_use_conf or len(ensemble_meta_features) > 0
+            stacking_mode = 'informed' if use_any_meta else 'naive'
 
-        # Rule 3: min_games_played should be the max across all base models
-        # This ensures consistency - if any base model required 20 games, the ensemble should too
-        max_min_games = max(
-            (m.get('min_games_played', 15) for m in base_models),
-            default=15
-        )
+        base_ids = [str(m) if not isinstance(m, str) else m for m in ensemble_models]
+        ensemble_id = config.get('ensemble_id') or None
+        ensemble_name = config.get('name') or None
+        league_id_str = league.league_id if league else 'nba'
 
-        time_config = {
-            'begin_year': ref_config.get('begin_year'),
-            'calibration_years': ref_config.get('calibration_years'),
-            'evaluation_year': ref_config.get('evaluation_year'),
-            'min_games_played': max_min_games,  # Rule 3: max across base models
-            'calibration_method': ref_config.get('calibration_method'),
-            'exclude_seasons': ref_config.get('exclude_seasons'),
-        }
-        
-        # Create ensemble config document for training
-        ensemble_config = {
-            'ensemble': True,
-            'ensemble_type': 'stacking',
-            'ensemble_models': ensemble_models,
-            'ensemble_meta_features': ensemble_meta_features,
-            'ensemble_use_disagree': ensemble_use_disagree,
-            'ensemble_use_conf': ensemble_use_conf,
-            'ensemble_use_logit': ensemble_use_logit,
-            'model_type': meta_model_type,  # Store meta-model type
-            'best_c_value': meta_c_value,
-            'features': [],  # Ensembles don't have traditional features
-            'feature_count': 0,
-            'name': f'Ensemble ({len(ensemble_models)} models) - {meta_model_type}',
-            'selected': False,
-            'use_master': True,
-            'use_time_calibration': True,
-            'begin_year': time_config['begin_year'],
-            'calibration_years': time_config['calibration_years'],
-            'evaluation_year': time_config['evaluation_year'],
-            'calibration_method': time_config['calibration_method'],
-            'exclude_seasons': time_config['exclude_seasons'],
-            'min_games_played': time_config['min_games_played'],
-            'trained_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow(),
-            'config_hash': f'ensemble_{generate_feature_set_hash(sorted(ensemble_models))}_{meta_model_type}'
-        }
-        
-        # Insert or update ensemble config
-        # First try to find by config_hash, then fallback to matching ensemble_models + model_type
-        existing_ensemble = db[classifier_config_collection].find_one({'config_hash': ensemble_config['config_hash']})
-        if not existing_ensemble:
-            # Fallback: find by ensemble_models and model_type (handles old hash format)
-            existing_ensemble = db[classifier_config_collection].find_one({
-                'ensemble': True,
-                'ensemble_models': ensemble_models,
-                'model_type': meta_model_type
-            })
-            if existing_ensemble:
-                # Update the old config's hash to the new format
-                db[classifier_config_collection].update_one(
-                    {'_id': existing_ensemble['_id']},
-                    {'$set': {'config_hash': ensemble_config['config_hash']}}
+        job_id = create_job('train', league=league, config_id=ensemble_id)
+
+        def _run(job_id, base_ids, meta_model_type, meta_c_value, stacking_mode,
+                 ensemble_meta_features, ensemble_use_disagree, ensemble_use_conf,
+                 ensemble_use_logit, league_id, ens_id, ens_name):
+            from bball.league_config import load_league_config
+            from bball.mongo import Mongo
+            import traceback as tb
+            try:
+                league_config = load_league_config(league_id)
+                bg_db = Mongo().db
+                svc = TrainingService(league=league_config, db=bg_db)
+                svc.train_ensemble(
+                    meta_model_type=meta_model_type,
+                    base_model_names_or_ids=base_ids,
+                    meta_c_value=meta_c_value,
+                    extra_features=ensemble_meta_features or None,
+                    stacking_mode=stacking_mode,
+                    use_disagree=ensemble_use_disagree,
+                    use_conf=ensemble_use_conf,
+                    use_logit=ensemble_use_logit,
+                    ensemble_id=ens_id,
+                    name=ens_name,
                 )
-                logger.info(f"Updated old ensemble config hash to new format: {existing_ensemble['_id']}")
-        if existing_ensemble:
-            config_id = str(existing_ensemble['_id'])
-            # Update existing config with current meta-feature settings
-            db[classifier_config_collection].update_one(
-                {'_id': ObjectId(config_id)},
-                {'$set': {
-                    'updated_at': datetime.utcnow(),
-                    'training_in_progress': True,
-                    'ensemble_meta_features': ensemble_meta_features,
-                    'ensemble_use_disagree': ensemble_use_disagree,
-                    'ensemble_use_conf': ensemble_use_conf,
-                    'ensemble_use_logit': ensemble_use_logit,
-                }}
-            )
-        else:
-            # Insert new config
-            result = db[classifier_config_collection].insert_one(ensemble_config)
-            config_id = str(result.inserted_id)
-        
-        # Create job for ensemble training
-        job_id = create_job('train', league=league, config_id=config_id)
-        logger.info(f"Created ensemble training job {job_id} for config {config_id}")
+                complete_job(job_id, 'Ensemble training completed successfully', league=league_config)
+            except Exception as e:
+                tb.print_exc()
+                try:
+                    league_config = load_league_config(league_id)
+                    fail_job(job_id, f'Ensemble training failed: {str(e)}', league=league_config)
+                except Exception:
+                    pass
 
-        # Start ensemble training in background thread
-        ensemble_training_thread = threading.Thread(
-            target=run_ensemble_training_job,
-            args=(
-                job_id,
-                config_id,
-                ensemble_models,
-                meta_model_type,
-                meta_c_value,
-                ensemble_meta_features,
-                ensemble_use_disagree,
-                ensemble_use_conf,
-                ensemble_use_logit,
-                time_config,
-                classifier_config_collection,
-                league
-            ),
-            daemon=True
+        thread = threading.Thread(
+            target=_run,
+            args=(job_id, base_ids, meta_model_type, meta_c_value, stacking_mode,
+                  ensemble_meta_features, ensemble_use_disagree, ensemble_use_conf,
+                  ensemble_use_logit, league_id_str, ensemble_id, ensemble_name),
+            daemon=True,
         )
-        ensemble_training_thread.start()
-        
-        # Return job_id immediately
+        thread.start()
+
         return jsonify({
             'success': True,
             'job_id': job_id,
-            'message': f'Ensemble training job started for {meta_model_type} meta-model'
+            'message': f'Ensemble training job started for {meta_model_type} meta-model',
         })
-        
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        logger.error(f"Error starting ensemble training job: {str(e)}\n{error_trace}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e), 'traceback': error_trace}), 500
-
-
-def run_ensemble_training_job(
-    job_id: str,
-    config_id: str,
-    ensemble_models: list,
-    meta_model_type: str,
-    meta_c_value: float,
-    ensemble_meta_features: list,
-    ensemble_use_disagree: bool,
-    ensemble_use_conf: bool,
-    ensemble_use_logit: bool,
-    time_config: dict,
-    classifier_config_collection: str = 'nba_model_config',
-    league=None
-):
-    """
-    Run ensemble training job asynchronously with progress updates.
-    """
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    
-    try:
-        update_job_progress(job_id, 1, 'Initializing ensemble training...', league=league)
-
-        # Import required modules
-        from bball.training.stacking_trainer import StackingTrainer
-        import uuid
-
-        update_job_progress(job_id, 5, 'Loading base models...', league=league)
-
-        # Create stacking trainer directly (no ModelerAgent needed)
-        session_id = str(uuid.uuid4())
-        stacking_trainer = StackingTrainer(db=db, league=league)
-
-        # Prepare dataset specification with validated time config (Rules 2 & 3)
-        dataset_spec = {
-            'begin_year': time_config['begin_year'],
-            'calibration_years': time_config['calibration_years'],
-            'evaluation_year': time_config['evaluation_year'],
-            'min_games_played': time_config.get('min_games_played', 0),  # Rule 3: max across base models
-            'use_master': True
-        }
-
-        update_job_progress(job_id, 10, 'Training ensemble meta-model...', league=league)
-
-        # Determine stacking mode based on meta features
-        use_any_meta = ensemble_use_disagree or ensemble_use_conf or len(ensemble_meta_features) > 0
-        stacking_mode = 'informed' if use_any_meta else 'naive'
-
-        logger.info(f"Training ensemble with {len(ensemble_models)} base models")
-        logger.info(f"Meta-model type: {meta_model_type}, C-value: {meta_c_value}")
-        logger.info(f"Stacking mode: {stacking_mode}")
-
-        # Train stacked model
-        result = stacking_trainer.train_stacked_model(
-            base_config_ids=ensemble_models,  # Use MongoDB config IDs
-            dataset_spec=dataset_spec,
-            session_id=session_id,
-            meta_c_value=meta_c_value,
-            stacking_mode=stacking_mode,
-            meta_features=ensemble_meta_features,
-            use_disagree=ensemble_use_disagree,
-            use_conf=ensemble_use_conf,
-            use_logit=ensemble_use_logit,
-        )
-        
-        update_job_progress(job_id, 90, 'Finalizing ensemble model...', league=league)
-        
-        if result and 'run_id' in result:
-            # Update ensemble config with training results
-            ensemble_update = {
-                'ensemble_run_id': result['run_id'],
-                'training_in_progress': False,
-                'updated_at': datetime.utcnow()
-            }
-
-            diagnostics = result.get('diagnostics') if isinstance(result, dict) else None
-            if isinstance(diagnostics, dict):
-                meta_feature_importances = diagnostics.get('meta_feature_importances')
-                if isinstance(meta_feature_importances, dict) and meta_feature_importances:
-                    features_ranked = []
-                    for rank, (name, score) in enumerate(meta_feature_importances.items(), 1):
-                        features_ranked.append({
-                            'rank': rank,
-                            'name': name,
-                            'score': sanitize_nan(score)
-                        })
-                    ensemble_update['features_ranked'] = features_ranked
-                    ensemble_update['feature_count'] = len(features_ranked)
-                    ensemble_update['features'] = [f['name'] for f in features_ranked]
-
-                base_models_summary = diagnostics.get('base_models_summary')
-                if isinstance(base_models_summary, list) and base_models_summary:
-                    ensemble_update['ensemble_base_models_summary'] = base_models_summary
-
-            # Add metrics if available
-            if 'metrics' in result:
-                metrics = result['metrics']
-                # Stacking trainer uses *_mean/*_std naming convention
-                ensemble_update.update({
-                    'accuracy': sanitize_nan(metrics.get('accuracy_mean') or metrics.get('accuracy')),
-                    'log_loss': sanitize_nan(metrics.get('log_loss_mean') or metrics.get('log_loss')),
-                    'brier_score': sanitize_nan(metrics.get('brier_mean') or metrics.get('brier_score')),
-                    'std_dev': sanitize_nan(metrics.get('accuracy_std') or metrics.get('std_dev'))
-                })
-
-            # Add artifact paths and meta-model config if available
-            if 'artifacts' in result:
-                artifacts = result['artifacts']
-                if artifacts.get('meta_model_path'):
-                    ensemble_update['meta_model_path'] = artifacts['meta_model_path']
-                if artifacts.get('meta_scaler_path'):
-                    ensemble_update['meta_scaler_path'] = artifacts['meta_scaler_path']
-                if artifacts.get('ensemble_config_path'):
-                    ensemble_update['ensemble_config_path'] = artifacts['ensemble_config_path']
-                if artifacts.get('meta_model_type'):
-                    ensemble_update['meta_model_type'] = artifacts['meta_model_type']
-                if artifacts.get('meta_c_value') is not None:
-                    ensemble_update['meta_c_value'] = artifacts['meta_c_value']
-                    # Also set best_c_value for UI compatibility
-                    ensemble_update['best_c_value'] = artifacts['meta_c_value']
-
-            db[classifier_config_collection].update_one(
-                {'_id': ObjectId(config_id)},
-                {'$set': ensemble_update}
-            )
-
-            complete_job(job_id, f'Ensemble training completed successfully', league=league)
-            logger.info(f"Ensemble training completed: {result['run_id']}")
-            
-        else:
-            error_msg = f"Ensemble training failed: {result}"
-            fail_job(job_id, error_msg, league=league)
-            logger.error(error_msg)
 
     except Exception as e:
         import traceback
-        error_trace = traceback.format_exc()
-        error_msg = f'Ensemble training failed: {str(e)}'
-        fail_job(job_id, error_msg, league=league)
-        logger.error(f"{error_msg}\n{error_trace}")
         traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/<league_id>/api/points-model/train', methods=['POST'])
@@ -6459,7 +6135,7 @@ def train_points_model(league_id=None):
             use_time_calibration = True
         
         calibration_method = config.get('calibration_method', 'isotonic') if use_time_calibration else None
-        
+
         print(f"[train_points_model] After normalization and auto-enable check:")
         print(f"  use_time_calibration: {use_time_calibration}")
         print(f"  begin_year: {begin_year}")
@@ -6625,26 +6301,23 @@ def train_points_model(league_id=None):
         report_path = trainer.generate_diagnostics(training_results)
         
         # Save config to MongoDB
-        # generate_feature_set_hash is aliased from ModelConfigManager (line ~659)
-        import hashlib
-        
         # Use all features if none selected
         if not features:
             # Get features from training results (set during create_training_data)
             features = training_results.get('feature_names', [])
             if not features and hasattr(trainer, 'feature_names') and trainer.feature_names:
                 features = trainer.feature_names
-        
-        # Generate feature set hash
+
+        # Generate feature set hash (for display names)
         feature_set_hash = generate_feature_set_hash(features) if features else ''
-        
+
         # Get best metrics (for Ridge, use best alpha; for others, use CV results)
         final_metrics = training_results['final_metrics']
         best_alpha = None
         alphas_tested = None
         if model_type == 'Ridge' and training_results.get('cv_results'):
             # Find best alpha from CV results
-            best_cv = min(training_results['cv_results'], 
+            best_cv = min(training_results['cv_results'],
                          key=lambda x: (x['home_mae'] + x['away_mae']) / 2)
             best_alpha = best_cv.get('alpha')
             # Extract all alphas tested
@@ -6652,43 +6325,16 @@ def train_points_model(league_id=None):
         elif model_type == 'Ridge' and training_results.get('selected_alpha'):
             best_alpha = training_results.get('selected_alpha')
             alphas_tested = training_results.get('alphas_tested')
-        
-        # Generate config hash (include model type + features + model parameters + calibration settings)
-        hash_parts = [model_type, feature_set_hash]
-        
-        if model_type == 'Ridge' and best_alpha is not None:
-            hash_parts.append(f"alpha={best_alpha}")
-        elif model_kwargs:
-            params_str = '|'.join([f"{k}={v}" for k, v in sorted(model_kwargs.items())])
-            hash_parts.append(params_str)
-        
-        # Include calibration settings in hash
-        if use_time_calibration:
-            hash_parts.append(f"cal=1")
-            if calibration_method:
-                hash_parts.append(f"cal_method={calibration_method}")
-            if begin_year is not None:
-                hash_parts.append(f"begin_year={begin_year}")
-            if calibration_years:
-                cal_years_str = ','.join(sorted([str(y) for y in calibration_years]))
-                hash_parts.append(f"cal_years={cal_years_str}")
-            if evaluation_year is not None:
-                hash_parts.append(f"eval_year={evaluation_year}")
-        else:
-            hash_parts.append(f"cal=0")
-        
-        config_hash_str = '|'.join(hash_parts)
-        config_hash = hashlib.md5(config_hash_str.encode()).hexdigest()
-        
+
         # Prepare config document
         config_doc = {
-            'config_hash': config_hash,
             'model_type': model_type,
             'feature_set_hash': feature_set_hash,
             'features': sorted(features) if features else [],
             'feature_count': len(features) if features else training_results['n_features'],
             'model_path': model_path,
             'report_path': report_path,
+            'name': f"{model_type} - {feature_set_hash[:8] if feature_set_hash else 'default'}",
             'metrics': {
                 'home_mae': sanitize_nan(final_metrics['home_mae']),
                 'home_rmse': sanitize_nan(final_metrics['home_rmse']),
@@ -6715,49 +6361,22 @@ def train_points_model(league_id=None):
             'begin_year': begin_year if use_time_calibration else None,
             'calibration_years': calibration_years if use_time_calibration else None,
             'evaluation_year': evaluation_year if use_time_calibration else None,
+            'trained_at': datetime.utcnow(),
             'updated_at': datetime.utcnow(),
         }
-        
+
         if best_alpha is not None:
             config_doc['best_alpha'] = best_alpha
         if alphas_tested is not None:
             config_doc['alphas_tested'] = alphas_tested
-        
-        # Check if config exists
-        existing = db[points_config_collection].find_one({'config_hash': config_hash})
-        
-        if existing and existing.get('name'):
-            # Preserve custom name
-            existing_name = existing['name']
-            auto_name_prefix = f"{model_type} - {feature_set_hash[:8] if feature_set_hash else 'default'}"
-            if not existing_name.startswith(auto_name_prefix):
-                config_doc['name'] = existing_name
-            else:
-                config_doc['name'] = f"{model_type} - {feature_set_hash[:8] if feature_set_hash else 'default'}"
-        else:
-            config_doc['name'] = f"{model_type} - {feature_set_hash[:8] if feature_set_hash else 'default'}"
-        
-        # Set selected flag (first config becomes selected)
-        if not existing:
-            existing_selected = db[points_config_collection].find_one({'selected': True})
-            config_doc['selected'] = (existing_selected is None)
-            config_doc['trained_at'] = datetime.utcnow()
-        else:
-            config_doc['selected'] = existing.get('selected', False)
-        
-        # Upsert config
-        result = db[points_config_collection].update_one(
-            {'config_hash': config_hash},
-            {'$set': config_doc},
-            upsert=True
-        )
 
-        # Get document ID
-        if result.upserted_id:
-            config_id = str(result.upserted_id)
-        else:
-            doc = db[points_config_collection].find_one({'config_hash': config_hash})
-            config_id = str(doc['_id'])
+        # Set selected flag (first config becomes selected)
+        existing_selected = db[points_config_collection].find_one({'selected': True})
+        config_doc['selected'] = (existing_selected is None)
+
+        # Always insert a new document
+        result = db[points_config_collection].insert_one(config_doc)
+        config_id = str(result.inserted_id)
         
         # Sanitize training_results to remove non-serializable model objects
         sanitized_results = sanitize_training_results(training_results)
@@ -7615,6 +7234,14 @@ def get_market_dashboard(league_id=None):
     from datetime import timedelta
     from bball.market.connector import MarketConnector
 
+    refresh = request.args.get('refresh') == '1'
+
+    # Return cached data if available and not a forced refresh
+    if not refresh:
+        cached = _market_dashboard_cache.get('dashboard')
+        if cached is not None:
+            return jsonify(cached)
+
     # Check for API credentials
     api_key = os.environ.get('KALSHI_API_KEY')
     private_key_dir = os.environ.get('KALSHI_PRIVATE_KEY_DIR')
@@ -7657,10 +7284,21 @@ def get_market_dashboard(league_id=None):
             settlements.extend(page)
             stats_cursor = settlements_resp.get('cursor')
 
-        # Get fills
-        fills_resp = connector.get_fills(limit=100)
-        fills = fills_resp.get('fills', [])
+        # Fetch first page of fills for display (keep cursor for lazy-loading)
+        fills_resp = connector.get_fills(limit=20)
+        fills = list(fills_resp.get('fills', []))
         fills_cursor = fills_resp.get('cursor')
+
+        # Continue fetching remaining fills for total invested calculation
+        all_fills = list(fills)
+        stats_fills_cursor = fills_cursor
+        while stats_fills_cursor:
+            more_resp = connector.get_fills(limit=100, cursor=stats_fills_cursor)
+            page = more_resp.get('fills', [])
+            if not page:
+                break
+            all_fills.extend(page)
+            stats_fills_cursor = more_resp.get('cursor')
 
         # Calculate time-based returns from settlements
         now = datetime.now()
@@ -7703,9 +7341,9 @@ def get_market_dashboard(league_id=None):
             elif pnl < 0:
                 losing_trades += 1
 
-        # Calculate total invested from fills
+        # Calculate total invested from ALL fills (not just first page)
         total_invested_cents = 0
-        for f in fills:
+        for f in all_fills:
             # Each fill has a cost (price * count in cents)
             if f.get('side') == 'yes':
                 total_invested_cents += f.get('yes_price', 0) * f.get('count', 0)
@@ -7771,7 +7409,7 @@ def get_market_dashboard(league_id=None):
                 'cumulative_return': cumulative,
             })
 
-        return jsonify({
+        result = {
             'success': True,
             'stats': {
                 'balance_cents': balance_cents,
@@ -7791,7 +7429,9 @@ def get_market_dashboard(league_id=None):
             'fills_cursor': fills_cursor,
             'settlements_cursor': settlements_cursor,
             'returns_over_time': returns_over_time
-        })
+        }
+        _market_dashboard_cache.set('dashboard', result)
+        return jsonify(result)
 
     except Exception as e:
         import traceback
@@ -7921,6 +7561,7 @@ def get_market_settlements(league_id=None):
 # ── In-memory cache for Kalshi portfolio data (shared across endpoints) ──
 from sportscore.market import SimpleCache
 _market_portfolio_cache = SimpleCache(default_ttl=300)
+_market_dashboard_cache = SimpleCache(default_ttl=86400 * 365)  # manual refresh only
 
 
 @app.route('/<league_id>/api/market/bins', methods=['GET'])
@@ -7958,16 +7599,24 @@ def get_market_bins(league_id=None):
 
     # Build ticker prefixes from league config
     ticker_prefixes = []
-    if market_type in ('moneyline', 'both'):
-        series = market_config.get('series_ticker')
+    league_series_prefixes = []  # all known series prefixes for this league
+    series = market_config.get('series_ticker')
+    spread_series = market_config.get('spread_series_ticker')
+    if series:
+        league_series_prefixes.append(series)
+    if spread_series:
+        league_series_prefixes.append(spread_series)
+
+    include_parlays = market_type in ('parlay', 'all')
+
+    if market_type in ('moneyline', 'both', 'all'):
         if series:
             ticker_prefixes.append(series)
-    if market_type in ('spread', 'both'):
-        spread_series = market_config.get('spread_series_ticker')
+    if market_type in ('spread', 'both', 'all'):
         if spread_series:
             ticker_prefixes.append(spread_series)
 
-    if not ticker_prefixes:
+    if not ticker_prefixes and not include_parlays:
         return jsonify({
             'success': False,
             'error': 'No series ticker configured for this market type'
@@ -8004,10 +7653,61 @@ def get_market_bins(league_id=None):
             settlements = fetch_all_settlements(connector)
             _market_portfolio_cache.set('portfolio_settlements', settlements, ttl=300)
 
-        result = compute_market_bins(
-            fills, settlements, ticker_prefixes,
-            bins=custom_bins, bin_mode=bin_mode,
-        )
+        # Pre-filter parlay fills if needed (MULTIGAME tickers belonging to this league)
+        if include_parlays and league_series_prefixes:
+            def _is_league_parlay(item):
+                t = item.get('ticker', '').upper()
+                if 'MULTIGAME' not in t:
+                    return False
+                # Same-league check: ticker or event_ticker contains a league series prefix
+                et = item.get('event_ticker', '').upper()
+                return any(p.upper() in t or p.upper() in et for p in league_series_prefixes)
+
+            parlay_fills = [f for f in fills if _is_league_parlay(f)]
+            parlay_settlements = [s for s in settlements if _is_league_parlay(s)]
+
+            if market_type == 'parlay':
+                # Parlay-only: pass pre-filtered lists with no prefix filter
+                result = compute_market_bins(
+                    parlay_fills, parlay_settlements, [],
+                    bins=custom_bins, bin_mode=bin_mode,
+                )
+            else:
+                # "all": combine regular prefix-filtered + parlay results
+                # Run regular first, then parlay, merge totals
+                regular = compute_market_bins(
+                    fills, settlements, ticker_prefixes,
+                    bins=custom_bins, bin_mode=bin_mode,
+                )
+                parlay = compute_market_bins(
+                    parlay_fills, parlay_settlements, [],
+                    bins=custom_bins, bin_mode=bin_mode,
+                )
+                # Merge bin-by-bin
+                for i, rb in enumerate(regular['bins']):
+                    pb = parlay['bins'][i]
+                    rb['count'] += pb['count']
+                    rb['won'] += pb['won']
+                    rb['cost'] += pb['cost']
+                    rb['revenue'] += pb['revenue']
+                    rb['pnl'] += pb['pnl']
+                    rb['win_pct'] = round((rb['won'] / rb['count'] * 100) if rb['count'] > 0 else 0, 1)
+                    rb['roi'] = round((rb['pnl'] / rb['cost'] * 100) if rb['cost'] > 0 else 0, 1)
+                # Merge totals
+                for key in ('count', 'won', 'cost', 'revenue', 'pnl'):
+                    regular['totals'][key] += parlay['totals'][key]
+                t = regular['totals']
+                t['win_pct'] = round((t['won'] / t['count'] * 100) if t['count'] > 0 else 0, 1)
+                t['roi'] = round((t['pnl'] / t['cost'] * 100) if t['cost'] > 0 else 0, 1)
+                regular['n_fills'] += parlay['n_fills']
+                regular['n_unsettled'] += parlay['n_unsettled']
+                result = regular
+        else:
+            result = compute_market_bins(
+                fills, settlements, ticker_prefixes,
+                bins=custom_bins, bin_mode=bin_mode,
+            )
+
         result['success'] = True
         return jsonify(result)
 

@@ -20,6 +20,7 @@ Handler signature:
             home_team, away_team, home_games, away_games, **context)
 """
 
+import bisect
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from math import log1p, exp, radians, sin, cos, sqrt, atan2
@@ -1523,6 +1524,380 @@ def compute_injury(
 
 
 # ============================================================================
+# Handler: compute_matchup (Cross-team style matchup interactions)
+# ============================================================================
+
+# Dispatch map: (offense_stat_key, defense_stat_key, formula)
+_MATCHUP_MAP = {
+    "mu_pace_delta":       ("pace",       "pace",          "diff"),
+    "mu_oreb_vs_dreb":     ("off_reb",    "def_reb",       "diff"),
+    "mu_to_vs_steals":     ("to_metric",  "steals",        "product"),
+    "mu_three_exposure":   ("three_rate", "opp_three_pct", "product"),
+    "mu_ft_draw_vs_fouls": ("ft_rate",    "opp_ft_rate",   "diff"),
+    "mu_paint_vs_blocks":  ("paint_rate", "blocks",        "product"),
+    "mu_off_vs_def":       ("off_rtg",    "def_rtg",       "diff"),
+    "mu_ast_vs_steals":    ("assists",    "steals",        "diff"),
+}
+
+
+def _compute_matchup_stat(stat_key, team, games, calc_weight="avg"):
+    """Compute a stat value for matchup features.
+
+    Handles stats not in the standard _compute_stat_for_team infrastructure:
+    - off_reb: offensive rebounds per game from td.off_reb
+    - def_reb: defensive rebounds per game (td.total_reb - td.off_reb)
+    - opp_ft_rate: opponent FT_att / opponent FG_att across games
+    - opp_three_pct: delegates to _compute_stat_for_team
+    - paint_rate: 1.0 - three_rate
+    All others: delegate to _compute_stat_for_team
+    """
+    if not games:
+        return 0.0
+
+    if stat_key == "off_reb":
+        values = []
+        for game in games:
+            td, _, _ = _get_team_data(game, team)
+            val = td.get("off_reb")
+            if val is not None:
+                values.append(float(val))
+        return sum(values) / len(values) if values else 0.0
+
+    if stat_key == "def_reb":
+        values = []
+        for game in games:
+            td, _, _ = _get_team_data(game, team)
+            total_reb = td.get("total_reb")
+            off_reb = td.get("off_reb")
+            if total_reb is not None and off_reb is not None:
+                values.append(float(total_reb) - float(off_reb))
+        return sum(values) / len(values) if values else 0.0
+
+    if stat_key == "opp_ft_rate":
+        total_opp_ft_att = 0.0
+        total_opp_fg_att = 0.0
+        for game in games:
+            _, od, _ = _get_team_data(game, team)
+            total_opp_ft_att += float(od.get("FT_att", 0) or 0)
+            total_opp_fg_att += float(od.get("FG_att", 0) or 0)
+        return (total_opp_ft_att / total_opp_fg_att) if total_opp_fg_att > 0 else 0.0
+
+    if stat_key == "paint_rate":
+        three_rate = _compute_stat_for_team("three_rate", team, games, calc_weight)
+        return 1.0 - three_rate
+
+    # Everything else delegates to the standard infrastructure
+    return _compute_stat_for_team(stat_key, team, games, calc_weight)
+
+
+def compute_matchup(
+    stat_name, time_period, calc_weight, perspective,
+    home_team, away_team, home_games, away_games,
+    **context,
+) -> Optional[float]:
+    """Compute cross-team style matchup features.
+
+    Each matchup stat combines one team's offensive tendency with the
+    opponent's defensive tendency using either difference or product.
+
+    Handles: mu_pace_delta, mu_oreb_vs_dreb, mu_to_vs_steals,
+             mu_three_exposure, mu_ft_draw_vs_fouls, mu_paint_vs_blocks,
+             mu_off_vs_def, mu_ast_vs_steals
+    """
+    if stat_name not in _MATCHUP_MAP:
+        return None
+
+    offense_key, defense_key, formula = _MATCHUP_MAP[stat_name]
+
+    engine = context.get("engine")
+    reference_date = context.get("reference_date")
+    has_side = context.get("has_side", False)
+
+    h_games = _window_and_filter(
+        home_games, time_period, reference_date, home_team, has_side, "home", engine)
+    a_games = _window_and_filter(
+        away_games, time_period, reference_date, away_team, has_side, "away", engine)
+
+    # Home perspective: home offense vs away defense
+    home_off = _compute_matchup_stat(offense_key, home_team, h_games)
+    away_def = _compute_matchup_stat(defense_key, away_team, a_games)
+
+    if formula == "diff":
+        home_val = home_off - away_def
+    else:  # product
+        home_val = home_off * away_def
+
+    # Away perspective: away offense vs home defense
+    away_off = _compute_matchup_stat(offense_key, away_team, a_games)
+    home_def = _compute_matchup_stat(defense_key, home_team, h_games)
+
+    if formula == "diff":
+        away_val = away_off - home_def
+    else:  # product
+        away_val = away_off * home_def
+
+    return _apply_perspective(home_val, away_val, perspective)
+
+
+# ============================================================================
+# Handler: compute_sos (Strength of Schedule)
+# ============================================================================
+
+def _extract_opponent(game, team):
+    """Get opponent name from a game doc."""
+    home_name = game.get("homeTeam", {}).get("name")
+    away_name = game.get("awayTeam", {}).get("name")
+    if home_name == team:
+        return away_name
+    return home_name
+
+
+def _get_opponent_season_games(opponent, season, reference_date, context):
+    """Get all games for an opponent before reference_date using preloaded index.
+
+    Returns list of game docs via O(log N) bisect on team_dates_index.
+    """
+    team_dates_index = context.get("team_dates_index", {})
+    team_games_index = context.get("team_games_index", {})
+    exclude_game_types = context.get("exclude_game_types", ["preseason", "allstar"])
+
+    dates = team_dates_index.get(season, {}).get(opponent)
+    if not dates:
+        return []
+
+    pairs = team_games_index[season][opponent]
+    hi = bisect.bisect_left(dates, reference_date)
+    exclude_set = set(exclude_game_types)
+    return [g for _, g in pairs[:hi]
+            if g.get("game_type", "regseason") not in exclude_set]
+
+
+def _compute_opp_stat_cached(opponent, season, ref_date, inner_stat,
+                              inner_weight, context, sos_cache):
+    """Compute an opponent's season stat with per-call caching.
+
+    Cache key is (opponent, inner_stat, inner_weight) to avoid recomputing
+    the same opponent's stat when they appear multiple times in the schedule.
+    """
+    cache_key = (opponent, inner_stat, inner_weight)
+    if cache_key in sos_cache:
+        return sos_cache[cache_key]
+
+    opp_games = _get_opponent_season_games(opponent, season, ref_date, context)
+    if not opp_games:
+        sos_cache[cache_key] = None
+        return None
+
+    val = _compute_stat_for_team(inner_stat, opponent, opp_games, inner_weight)
+    sos_cache[cache_key] = val
+    return val
+
+
+# Maps SOS stat names to (inner_stat, inner_calc_weight) for standard dispatch
+_SOS_STAT_MAP = {
+    "sos_opp_win_pct":  ("wins", "avg"),
+    "sos_opp_margin":   ("margin", "avg"),
+    "sos_opp_off_rtg":  ("off_rtg", "avg"),
+    "sos_opp_def_rtg":  ("def_rtg", "avg"),
+    "sos_opp_efg":      ("efg", "avg"),
+    "sos_opp_ts":       ("ts", "avg"),
+    "sos_opp_pace":     ("pace", "avg"),
+}
+
+
+def compute_sos(
+    stat_name, time_period, calc_weight, perspective,
+    home_team, away_team, home_games, away_games,
+    **context,
+) -> Optional[float]:
+    """Compute Strength of Schedule features.
+
+    Measures the quality of opponents faced, not what opponents did
+    against the team. Each opponent's stat is computed from their full
+    season body of work.
+    """
+    engine = context.get("engine")
+    reference_date = context.get("reference_date")
+    season = context.get("season", "")
+    has_side = context.get("has_side", False)
+
+    h_games = _window_and_filter(
+        home_games, time_period, reference_date, home_team, has_side, "home", engine)
+    a_games = _window_and_filter(
+        away_games, time_period, reference_date, away_team, has_side, "away", engine)
+
+    # Use shared cache from context (persists across all SOS calls for this game),
+    # or create a local one for backward compatibility
+    sos_cache = context.get("sos_cache")
+    if sos_cache is None:
+        sos_cache = {}
+
+    home_val = _sos_for_team(
+        stat_name, home_team, h_games, season, reference_date, context, sos_cache)
+    away_val = _sos_for_team(
+        stat_name, away_team, a_games, season, reference_date, context, sos_cache)
+
+    return _apply_perspective(home_val, away_val, perspective)
+
+
+def _sos_for_team(stat_name, team, games, season, ref_date, context, sos_cache):
+    """Compute a single SOS stat for one team across their games."""
+    if not games:
+        return 0.0
+
+    # Standard stat dispatch via map
+    if stat_name in _SOS_STAT_MAP:
+        inner_stat, inner_weight = _SOS_STAT_MAP[stat_name]
+        values = []
+        for game in games:
+            opp = _extract_opponent(game, team)
+            if not opp:
+                continue
+            val = _compute_opp_stat_cached(
+                opp, season, ref_date, inner_stat, inner_weight, context, sos_cache)
+            if val is not None:
+                values.append(val)
+        return sum(values) / len(values) if values else 0.0
+
+    # Special handlers
+    if stat_name == "sos_opp_net_rtg":
+        return _sos_opp_net_rtg(team, games, season, ref_date, context, sos_cache)
+
+    if stat_name == "sos_opp_elo":
+        return _sos_opp_elo(team, games, season, ref_date, context)
+
+    if stat_name == "sos_opp_days_rest":
+        return _sos_opp_rest(team, games, season, ref_date, context, mode="days")
+
+    if stat_name == "sos_opp_b2b_pct":
+        return _sos_opp_rest(team, games, season, ref_date, context, mode="b2b_pct")
+
+    if stat_name == "sos_opp_opp_win_pct":
+        return _sos_opp_opp_win_pct(team, games, season, ref_date, context, sos_cache)
+
+    return 0.0
+
+
+def _sos_opp_net_rtg(team, games, season, ref_date, context, sos_cache):
+    """Avg net rating (off_rtg - def_rtg) of opponents."""
+    values = []
+    for game in games:
+        opp = _extract_opponent(game, team)
+        if not opp:
+            continue
+        off = _compute_opp_stat_cached(
+            opp, season, ref_date, "off_rtg", "avg", context, sos_cache)
+        def_ = _compute_opp_stat_cached(
+            opp, season, ref_date, "def_rtg", "avg", context, sos_cache)
+        if off is not None and def_ is not None:
+            values.append(off - def_)
+    return sum(values) / len(values) if values else 0.0
+
+
+def _sos_opp_elo(team, games, season, ref_date, context):
+    """Avg Elo of opponents at the time of each game."""
+    elo_cache = context.get("elo_cache")
+    if elo_cache is None:
+        return 0.0
+
+    values = []
+    for game in games:
+        opp = _extract_opponent(game, team)
+        if not opp:
+            continue
+        game_date = game.get("date", ref_date)
+        try:
+            opp_elo = elo_cache.get_elo_for_game_with_fallback(opp, game_date, season)
+            values.append(opp_elo)
+        except Exception:
+            continue
+    return sum(values) / len(values) if values else 0.0
+
+
+def _sos_opp_rest(team, games, season, ref_date, context, mode="days"):
+    """Avg rest days (or B2B fraction) of opponents when facing this team.
+
+    Uses bisect on team_dates_index to find each opponent's prior game.
+    """
+    team_dates_index = context.get("team_dates_index", {})
+    team_games_index = context.get("team_games_index", {})
+
+    rest_values = []
+    cap = 7
+
+    for game in games:
+        opp = _extract_opponent(game, team)
+        if not opp:
+            continue
+        game_date = game.get("date", "")
+        if not game_date:
+            continue
+
+        # Find opponent's prior game via bisect
+        opp_dates = team_dates_index.get(season, {}).get(opp)
+        if not opp_dates:
+            rest_values.append(cap)
+            continue
+
+        idx = bisect.bisect_left(opp_dates, game_date)
+        if idx == 0:
+            rest_values.append(cap)
+            continue
+
+        prev_date_str = opp_dates[idx - 1]
+        try:
+            gd = datetime.strptime(game_date, "%Y-%m-%d").date()
+            pd = datetime.strptime(prev_date_str, "%Y-%m-%d").date()
+            days = (gd - pd).days
+            rest_values.append(min(max(days, 0), cap))
+        except (ValueError, TypeError):
+            rest_values.append(cap)
+
+    if not rest_values:
+        return 0.0
+
+    if mode == "b2b_pct":
+        b2b_count = sum(1 for r in rest_values if r == 1)
+        return b2b_count / len(rest_values)
+
+    return sum(rest_values) / len(rest_values)
+
+
+def _sos_opp_opp_win_pct(team, games, season, ref_date, context, sos_cache):
+    """2nd-order SOS: avg win% of opponents' opponents.
+
+    For each opponent, get their games, find their opponents, and average
+    those opponents' win percentages.
+    """
+    values = []
+    for game in games:
+        opp = _extract_opponent(game, team)
+        if not opp:
+            continue
+
+        # Get opponent's season games
+        opp_games = _get_opponent_season_games(opp, season, ref_date, context)
+        if not opp_games:
+            continue
+
+        # For each of opponent's games, get that opponent's win%
+        opp_opp_win_pcts = []
+        for opp_game in opp_games:
+            opp_opp = _extract_opponent(opp_game, opp)
+            if not opp_opp:
+                continue
+            wp = _compute_opp_stat_cached(
+                opp_opp, season, ref_date, "wins", "avg", context, sos_cache)
+            if wp is not None:
+                opp_opp_win_pcts.append(wp)
+
+        if opp_opp_win_pcts:
+            values.append(sum(opp_opp_win_pcts) / len(opp_opp_win_pcts))
+
+    return sum(values) / len(values) if values else 0.0
+
+
+# ============================================================================
 # Handler registry
 # ============================================================================
 
@@ -1538,4 +1913,6 @@ CUSTOM_HANDLERS = {
     "compute_context": compute_context,
     "compute_player": compute_player,
     "compute_injury": compute_injury,
+    "compute_sos": compute_sos,
+    "compute_matchup": compute_matchup,
 }

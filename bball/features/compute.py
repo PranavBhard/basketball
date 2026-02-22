@@ -141,17 +141,16 @@ class BasketballFeatureComputer:
 
         games = []
 
-        if self._team_dates_index:
+        if self._team_dates_index and self._team_dates_index.get(season, {}).get(team):
             # Fast bisect lookup on preloaded data
-            dates = self._team_dates_index.get(season, {}).get(team)
-            if dates:
-                pairs = self._team_games_index[season][team]
-                hi = bisect.bisect_left(dates, game_date)
-                exclude_set = set(self._exclude_game_types)
-                games = [
-                    g for _, g in pairs[:hi]
-                    if g.get("game_type", "regseason") not in exclude_set
-                ]
+            dates = self._team_dates_index[season][team]
+            pairs = self._team_games_index[season][team]
+            hi = bisect.bisect_left(dates, game_date)
+            exclude_set = set(self._exclude_game_types)
+            games = [
+                g for _, g in pairs[:hi]
+                if g.get("game_type", "regseason") not in exclude_set
+            ]
         elif self.db is not None:
             # Lazy DB query
             from bball.data import GamesRepository
@@ -275,11 +274,18 @@ class BasketballFeatureComputer:
             "games_home": self.games_home,
             "games_away": self.games_away,
             "team_games_index": self._team_games_index,
+            "team_dates_index": self._team_dates_index,
             "game_doc": game_doc,
             "target_venue_guid": venue_guid,
             "exclude_game_types": self._exclude_game_types,
             "conference_cache": self._conference_cache,
             "conf_teams_cache": self._conf_teams_cache,
+            # Shared SOS cache: persists across all SOS feature calls for this game.
+            # Key: (opponent, inner_stat, inner_weight) -> computed value.
+            # Avoids recomputing the same opponent's season stat across perspectives,
+            # across SOS stat types sharing inner stats (off_rtg, def_rtg → net_rtg),
+            # and across 2nd-order SOS lookups.
+            "sos_cache": {},
         }
 
     # ------------------------------------------------------------------

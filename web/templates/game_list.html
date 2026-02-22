@@ -769,6 +769,13 @@
     .betting-report-table .num {
         text-align: right;
     }
+    .betting-report-table tr.live-game {
+        background-color: rgba(76, 175, 80, 0.10);
+    }
+    .betting-report-table tr.done-game {
+        background-color: rgba(0, 0, 0, 0.04);
+        opacity: 0.5;
+    }
     .betting-report-header-inputs {
         display: flex;
         align-items: center;
@@ -1176,7 +1183,8 @@
                     
                     // Transform display label based on side for "no" bets
                     let transformedLabel = displayLabel;
-                    if (fill.side === 'no') {
+                    const wonLostBuySide = fill.buySide || fill.side;
+                    if (wonLostBuySide === 'no') {
                         const market = window.marketDataCache?.[gameId];
                         if (market && fill.team) {
                             const fillTeam = fill.team.toUpperCase();
@@ -1231,7 +1239,8 @@
 
                     // Transform display label based on side for "no" bets
                     let transformedLabel = displayLabel;
-                    if (fill.side === 'no') {
+                    const liveBuySide = fill.buySide || fill.side;
+                    if (liveBuySide === 'no') {
                         const market = window.marketDataCache?.[gameId];
                         if (market && fill.team) {
                             const fillTeam = fill.team.toUpperCase();
@@ -1300,7 +1309,7 @@
                             }
 
                             if (yesPrice != null) {
-                                if (fill.side === 'no') {
+                                if (liveBuySide === 'no') {
                                     livePrice = 1 - yesPrice;
                                 } else {
                                     livePrice = yesPrice;
@@ -2411,8 +2420,29 @@
                 `;
             }
 
-            // Category descriptions (ensemble_outputs removed - replaced by Base Model Predictions section above)
-            const categoryDescriptions = {
+            // Preferred display order for known categories
+            const categoryOrder = [
+                'point_predictions',
+                'outcome_strength',
+                'elo_strength',
+                'strength_of_schedule',
+                'matchup_style',
+                'player_talent',
+                'injuries',
+                'shooting_efficiency',
+                'offensive_engine',
+                'defensive_engine',
+                'pace_volatility',
+                'schedule_fatigue',
+                'h2h',
+                'close_games',
+                'vegas_lines',
+                'era_normalization',
+                'sample_size',
+            ];
+
+            // Human-readable labels (fallback: replace underscores with spaces and title-case)
+            const categoryLabels = {
                 'outcome_strength': 'Outcome Strength',
                 'shooting_efficiency': 'Shooting Efficiency',
                 'offensive_engine': 'Offensive Engine',
@@ -2423,36 +2453,30 @@
                 'elo_strength': 'Elo Strength',
                 'era_normalization': 'Era Normalization',
                 'player_talent': 'Player Talent',
-                'absolute_magnitude': 'Absolute Magnitude',
                 'injuries': 'Injuries',
-                'point_predictions': 'Point Predictions'
+                'point_predictions': 'Point Predictions',
+                'matchup_style': 'Matchup Style',
+                'strength_of_schedule': 'Strength of Schedule',
+                'h2h': 'Head-to-Head',
+                'close_games': 'Close Games',
+                'vegas_lines': 'Vegas Lines',
             };
 
-            // Define display order for categories (ensemble_outputs removed)
-            const categoryOrder = [
-                'point_predictions',
-                'outcome_strength',
-                'elo_strength',
-                'player_talent',
-                'injuries',
-                'shooting_efficiency',
-                'offensive_engine',
-                'defensive_engine',
-                'pace_volatility',
-                'schedule_fatigue',
-                'era_normalization',
-                'sample_size',
-                'absolute_magnitude'
+            // Build display order: known categories first, then any new ones from backend
+            const allCategories = Object.keys(data.feature_categories || {});
+            const orderedCategories = [
+                ...categoryOrder.filter(c => allCategories.includes(c)),
+                ...allCategories.filter(c => !categoryOrder.includes(c))
             ];
-            
-            // Display features by category in defined order
-            for (const category of categoryOrder) {
+
+            // Display features by category
+            for (const category of orderedCategories) {
                 const features = data.feature_categories[category];
                 if (!features || features.length === 0) continue;
 
                 html += `
                     <div class="feature-category">
-                        <h3>${categoryDescriptions[category] || category}</h3>
+                        <h3>${categoryLabels[category] || category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</h3>
                         <table class="features-table">
                             <thead>
                                 <tr>
@@ -2464,6 +2488,7 @@
                 `;
 
                 const normValues = data.meta_normalized_values || {};
+                const companions = data.meta_companions || {};
                 features.forEach(f => {
                     let displayValue;
                     if (typeof f.value === 'number') {
@@ -2480,9 +2505,22 @@
                     if (normValues[f.name] !== undefined) {
                         displayValue += ` <span style="color: #888; font-size: 11px;">(${normValues[f.name].toFixed(4)})</span>`;
                     }
+
+                    // For diff meta-features, show home/away breakdown
+                    let companionHtml = '';
+                    if (f.name.includes('|diff')) {
+                        const homeKey = f.name.replace('|diff', '|home');
+                        const awayKey = f.name.replace('|diff', '|away');
+                        if (companions[homeKey] !== undefined && companions[awayKey] !== undefined) {
+                            const hVal = companions[homeKey].toFixed(3);
+                            const aVal = companions[awayKey].toFixed(3);
+                            companionHtml = `<span style="color: #999; font-size: 10px; margin-left: 4px;">(H: ${hVal} / A: ${aVal})</span>`;
+                        }
+                    }
+
                     html += `
                         <tr>
-                            <td class="feature-name">${f.name}</td>
+                            <td class="feature-name">${f.name}${companionHtml}</td>
                             <td class="feature-value">${displayValue}</td>
                         </tr>
                     `;
@@ -2811,7 +2849,7 @@
                 lastPortfolioPositions = posData.positions;
                 // Collect game_ids that have fills or positions
                 for (const [gid, gdata] of Object.entries(posData.positions)) {
-                    if ((gdata.fills && gdata.fills.length > 0) || (gdata.positions && gdata.positions.length > 0)) {
+                    if ((gdata.fills && gdata.fills.length > 0) || (gdata.positions && gdata.positions.length > 0) || (gdata.parlay_fills && gdata.parlay_fills.length > 0)) {
                         forceGameIds.push(gid);
                     }
                 }
@@ -2821,7 +2859,7 @@
             const reportRes = await fetch(apiUrl('/api/betting-report'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date: dateStr, bankroll: bankroll, edge_threshold: edgeThreshold, force_include_game_ids: forceGameIds })
+                body: JSON.stringify({ date: dateStr, bankroll: bankroll, edge_threshold: edgeThreshold, force_include_game_ids: forceGameIds, portfolio_data: lastPortfolioPositions || {} })
             });
 
             const data = await reportRes.json();
@@ -2837,7 +2875,7 @@
                     const key = 'bettingInputs_' + window.ESPN_LEAGUE_SLUG;
                     sessionStorage.setItem(key, JSON.stringify({ bankroll: bankroll, edge: Math.round(edgeThreshold * 100) }));
                 } catch (e) {}
-                displayBettingReport(data.recommendations, data.brier_score, bankroll, edgeThreshold);
+                displayBettingReport(data.recommendations, data.brier_score, bankroll, edgeThreshold, data.parlay_fills);
                 // Start polling after first successful load
                 startBettingReportPoll();
             } else {
@@ -3016,7 +3054,7 @@
         return ` <span style="color:${c};font-size:0.75em;font-weight:600;">(${arrow}${Math.abs(val)}${s})</span>`;
     }
 
-    function displayBettingReport(recommendations, brierScore, bankroll, edgeThreshold) {
+    function displayBettingReport(recommendations, brierScore, bankroll, edgeThreshold, parlayFills) {
         const content = document.getElementById('betting-report-content');
         const meta = document.getElementById('betting-report-meta');
         const edgePctThreshold = Math.round((edgeThreshold || 0.07) * 100);
@@ -3111,6 +3149,22 @@
             return parts.length ? ` class="${parts.join(' ')}"` : '';
         }
 
+        // --- Parlay lookup: game_id → list of parlay fill objects ---
+        const parlayGameMap = {};   // game_id -> [pf, ...]
+        const parlayColorMap = {};  // ticker -> border color
+        const parlayBorderColors = ['#1976d2', '#c62828', '#ef6c00', '#7b1fa2', '#00838f', '#558b2f'];
+        if (parlayFills && parlayFills.length > 0) {
+            parlayFills.forEach((pf, idx) => {
+                parlayColorMap[pf.ticker] = parlayBorderColors[idx % parlayBorderColors.length];
+                for (const gid of (pf.all_game_ids || [])) {
+                    if (!parlayGameMap[gid]) parlayGameMap[gid] = [];
+                    parlayGameMap[gid].push(pf);
+                }
+            });
+        }
+        const countedParlayTickers = new Set();
+        let parlayNetTotal = 0;
+
         // --- Pass 2: render rows ---
         const nowForElapsed = Date.now();
         let rows = '';
@@ -3157,8 +3211,28 @@
 
             const actionCell = buildActionCell(r);
 
+            // Parlay info for this game's Action cell
+            const gameParlays = parlayGameMap[r.game_id] || [];
+            let parlayActionHtml = '';
+            gameParlays.forEach(pf => {
+                const label = pf.market_label || `${pf.num_legs}-leg`;
+                const cost = (pf.total_cost || 0);
+                const pnl = pf.total_pnl || 0;
+                const pnlColor = pnl >= 0 ? '#2e7d32' : '#c62828';
+                const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`;
+                const bdrColor = parlayColorMap[pf.ticker] || '#999';
+                parlayActionHtml += `<div style="border-left:2px solid ${bdrColor};padding-left:4px;margin-top:2px;font-size:0.85em;">${label}: $${cost.toFixed(2)} <span style="color:${pnlColor};font-weight:600;">${pnlStr}</span></div>`;
+                if (!countedParlayTickers.has(pf.ticker)) {
+                    countedParlayTickers.add(pf.ticker);
+                    parlayNetTotal += pnl;
+                }
+            });
+            const parlayRowStyle = gameParlays.length > 0 ? `border-left:3px solid ${parlayColorMap[gameParlays[0].ticker]};` : '';
+
             // Detect live game: game time has passed
-            const gameStarted = r.game_time && new Date(r.game_time) <= new Date();
+            // game_time from backend is UTC but may lack 'Z' suffix — ensure JS parses as UTC
+            const gameTimeStr = r.game_time && !r.game_time.endsWith('Z') && !r.game_time.includes('+') ? r.game_time + 'Z' : r.game_time;
+            const gameStarted = gameTimeStr && new Date(gameTimeStr) <= new Date();
 
             // Determine fill team perspective (for rows with fills)
             const fillIsHome = scenarios ? scenarios.homePnl >= scenarios.awayPnl : null;
@@ -3203,7 +3277,10 @@
             const fmtPAdj = fmtAmerican(pAdjAmOdds);
             const pAdjCell = `<td class="num">${fmtPAdj} (${pAdjPct}%)</td>`;
 
-            rows += `<tr>
+            const gameLive = gameStarted && r.market_status === 'active';
+            const gameDone = gameStarted && r.market_status !== 'active';
+            const rowClass = gameLive ? 'live-game' : gameDone ? 'done-game' : '';
+            rows += `<tr${rowClass ? ` class="${rowClass}"` : ''} style="${parlayRowStyle}">
                 <td>${time}</td>
                 <td${cls(blink)}>${teamCell}</td>
                 ${marketCell}
@@ -3212,32 +3289,59 @@
                 ${edgeCell}
                 <td class="num">${r.edge_kelly.toFixed(3)}</td>
                 <td class="num">${(r.bin_trust_weight != null ? r.bin_trust_weight : r.dog_variance_penalty || 1).toFixed(2)}</td>
-                <td class="num">${(r.edge_gate != null ? r.edge_gate : 1).toFixed(2)}</td>
                 ${stakeCell}
                 <td class="num"${hasFills && netValue !== null ? ` style="color:${netValue >= 0 ? '#2e7d32' : '#c62828'};font-weight:600;"` : ''}>${hasFills && netValue !== null ? `${netValue >= 0 ? '+' : '-'}$${Math.abs(netValue).toFixed(2)}` : '-'}</td>
-                <td class="num">${actionCell}</td>
+                <td class="num">${actionCell}${parlayActionHtml}</td>
                 <td class="num" style="color:#888;font-size:0.85em;" data-changed-team="${r.team}">${elapsed}</td>
             </tr>`;
         });
 
-        // Sum Net column
-        let netSum = 0;
+        // Sum Net column (singles only)
+        let singlesNet = 0;
         rowData.forEach(({ netValue, hasFills }) => {
-            if (hasFills && netValue !== null) netSum += netValue;
+            if (hasFills && netValue !== null) singlesNet += netValue;
         });
-        const netSumColor = netSum >= 0 ? '#2e7d32' : '#c62828';
-        const netSumStr = `${netSum >= 0 ? '+' : '-'}$${Math.abs(netSum).toFixed(2)}`;
+
+        // Build footer rows
+        let footerRows = '';
+        const totalNet = singlesNet + parlayNetTotal;
+        if (parlayNetTotal !== 0) {
+            // Show breakdown: singles, parlays, total
+            const sColor = singlesNet >= 0 ? '#2e7d32' : '#c62828';
+            const sStr = `${singlesNet >= 0 ? '+' : '-'}$${Math.abs(singlesNet).toFixed(2)}`;
+            const pColor = parlayNetTotal >= 0 ? '#2e7d32' : '#c62828';
+            const pStr = `${parlayNetTotal >= 0 ? '+' : '-'}$${Math.abs(parlayNetTotal).toFixed(2)}`;
+            const tColor = totalNet >= 0 ? '#2e7d32' : '#c62828';
+            const tStr = `${totalNet >= 0 ? '+' : '-'}$${Math.abs(totalNet).toFixed(2)}`;
+            footerRows = `<tr>
+                <td colspan="8" style="text-align:right;padding:4px 8px;color:#888;font-size:0.9em;">Singles:</td>
+                <td class="num" style="color:${sColor};font-size:0.9em;">${sStr}</td>
+                <td colspan="3"></td>
+            </tr><tr>
+                <td colspan="8" style="text-align:right;padding:4px 8px;color:#888;font-size:0.9em;">Parlays:</td>
+                <td class="num" style="color:${pColor};font-size:0.9em;">${pStr}</td>
+                <td colspan="3"></td>
+            </tr><tr>
+                <td colspan="8" style="text-align:right;font-weight:700;padding:8px;">Total:</td>
+                <td class="num" style="font-weight:700;color:${tColor};">${tStr}</td>
+                <td colspan="3"></td>
+            </tr>`;
+        } else {
+            const netSumColor = singlesNet >= 0 ? '#2e7d32' : '#c62828';
+            const netSumStr = `${singlesNet >= 0 ? '+' : '-'}$${Math.abs(singlesNet).toFixed(2)}`;
+            footerRows = `<tr>
+                <td colspan="8" style="text-align:right;font-weight:700;padding:8px;">Net Gain:</td>
+                <td class="num" style="font-weight:700;color:${netSumColor};">${netSumStr}</td>
+                <td colspan="3"></td>
+            </tr>`;
+        }
 
         content.innerHTML = `<table class="betting-report-table">
             <thead><tr>
-                <th>Time</th><th>Team</th><th class="num">Market</th><th class="num">Model</th><th class="num">p_adj</th><th class="num">Edge</th><th class="num">Kelly</th><th class="num">Bin Trust</th><th class="num">e-gate</th><th class="num">Stake</th><th class="num">Net</th><th class="num">Action</th><th class="num">Changed</th>
+                <th>Time</th><th>Team</th><th class="num">Market</th><th class="num">Model</th><th class="num">p_adj</th><th class="num">Edge</th><th class="num">Kelly</th><th class="num">Bin Trust</th><th class="num">Stake</th><th class="num">Net</th><th class="num">Action</th><th class="num">Changed</th>
             </tr></thead>
             <tbody>${rows}</tbody>
-            <tfoot><tr>
-                <td colspan="9" style="text-align:right;font-weight:700;padding:8px;">Net Gain:</td>
-                <td class="num" style="font-weight:700;color:${netSumColor};">${netSumStr}</td>
-                <td colspan="3"></td>
-            </tr></tfoot>
+            <tfoot>${footerRows}</tfoot>
         </table>`;
     }
 

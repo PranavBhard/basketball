@@ -4,215 +4,51 @@
 
 {% block content %}
 <div class="model-config-container">
-    
-    <div class="config-layout">
-        <!-- Left Side: Configuration Panel -->
-        <div class="config-panel">
-            <form id="model-config-form">
-                <!-- Model Types -->
-                <div class="config-section">
-                    <h3>Model Types</h3>
-                    <div class="checkbox-group">
-                        <label><input type="checkbox" name="model_types" value="LogisticRegression" checked> Logistic Regression</label>
-                        <label><input type="checkbox" name="model_types" value="RandomForest"> Random Forest</label>
-                        <label><input type="checkbox" name="model_types" value="GradientBoosting"> Gradient Boosting</label>
-                        <label><input type="checkbox" name="model_types" value="SVM"> SVM</label>
-                        <label><input type="checkbox" name="model_types" value="NaiveBayes"> Naive Bayes</label>
-                        <label><input type="checkbox" name="model_types" value="NeuralNetwork"> Neural Network</label>
-                    </div>
-                </div>
-                
-                <!-- Feature Sets -->
-                <div class="config-section">
-                    <h3>
-                        Feature Sets <span id="feature-count-display">(0)</span>
-                        <button type="button" id="edit-features-btn" class="edit-icon-btn" title="Edit features by name" style="margin-left: 8px; background: none; border: none; cursor: pointer; padding: 2px 4px;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/>
-                            </svg>
-                        </button>
-                    </h3>
-                    <div class="feature-sets-container">
-                        {% for set_name, set_features in feature_sets.items() %}
-                        <div class="feature-set-item">
-                            <div class="feature-set-header">
-                                <input type="checkbox" 
-                                       name="feature_sets" 
-                                       value="{{ set_name }}" 
-                                       id="set-{{ set_name }}"
-                                       class="feature-set-checkbox"
-                                       {% if set_name in ['outcome_strength', 'shooting_efficiency', 'offensive_engine', 'defensive_engine', 'pace_volatility', 'schedule_fatigue', 'sample_size', 'elo_strength', 'player_talent'] %}checked{% endif %}>
-                                <label for="set-{{ set_name }}" class="feature-set-label">
-                                    {{ set_name.replace('_', ' ').title() }}
-                                    <span class="feature-count" id="set-count-{{ set_name }}">(0/{{ set_features|length }})</span>
-                                </label>
-                                <button type="button" class="expand-btn" data-set="{{ set_name }}" aria-label="Expand">
-                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M6 3L1 8L11 8L6 3Z" fill="currentColor"/>
-                                    </svg>
-                                </button>
-                            </div>
-                            <div class="feature-list" id="features-{{ set_name }}" style="display: none;">
-                                {% for feature in set_features %}
-                                <label class="feature-item{% if feature not in available_features %} feature-unavailable{% endif %}">
-                                    <input type="checkbox"
-                                           name="features"
-                                           value="{{ feature }}"
-                                           class="feature-checkbox"
-                                           data-set="{{ set_name }}"
-                                           {% if feature not in available_features %}disabled title="Not available in training data"{% endif %}>
-                                    <span class="feature-name">{{ feature }}</span>
-                                    {% if feature not in available_features %}<span class="feature-unavailable-badge" title="Not in MASTER_TRAINING.csv">⚠</span>{% endif %}
-                                </label>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-                
-                <!-- Missing Features Warning Section -->
-                <div class="config-section" id="missing-features-section" style="display: none;">
-                    <h3 style="color: #d9534f;">
-                        Missing Features in Master CSV
-                        <span id="missing-features-count" style="color: #d9534f; font-weight: bold;">(0)</span>
-                    </h3>
-                    <div style="background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 12px; margin-top: 10px;">
-                        <p style="margin: 0 0 10px 0; color: #856404; font-size: 14px;">
-                            <strong>Warning:</strong> The following features are in the selected config but are not available in the master training CSV. 
-                            These features cannot be used for training and will be excluded when you save the config.
-                        </p>
-                        <div id="missing-features-list" style="max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; background: white; padding: 8px; border-radius: 3px; border: 1px solid #ddd;">
-                            <!-- Missing features will be populated here -->
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- C-Values (for LogisticRegression and SVM) -->
-                <div class="config-section">
-                    <h3>C-Values</h3>
-                    <div class="checkbox-group">
-                        <label><input type="checkbox" name="c_values" value="0.01"> 0.01</label>
-                        <label><input type="checkbox" name="c_values" value="0.1" checked> 0.1</label>
-                        <label><input type="checkbox" name="c_values" value="1.0" checked> 1.0</label>
-                        <label><input type="checkbox" name="c_values" value="10.0"> 10.0</label>
-                    </div>
-                </div>
-                
-                <!-- Master Training Data -->
-                <div class="config-section">
-                    <h3>Training Data Source</h3>
-                    <div class="checkbox-group">
-                        <label><input type="checkbox" name="use_master" id="use-master" checked> Use Cached Master Training Data</label>
-                        <small style="display: block; margin-top: 5px; color: #666;">
-                            Extract selected features from master CSV (much faster than recalculating)
-                        </small>
-                    </div>
-                    <div style="margin-top: 15px;">
-                        <label for="min-games-played" style="display: block; margin-bottom: 5px;">Minimum Prior Same-Season Games Per Team:</label>
-                        <input type="number" id="min-games-played" name="min_games_played" min="0" step="1" value="15" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                        <small style="display: block; margin-top: 5px; color: #666;">
-                            Rows are included only if both teams have at least this many prior same-season games. Used in filtering and CSV filename (e.g., _minGP-15).
-                        </small>
-                    </div>
-                    <div style="margin-top: 15px;">
-                        <label for="exclude-seasons" style="display: block; margin-bottom: 5px;">Exclude Seasons (comma-separated start years):</label>
-                        <input type="text" id="exclude-seasons" name="exclude_seasons" placeholder="e.g. 2019,2020" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                        <small style="display: block; margin-top: 5px; color: #666;">
-                            Season start years to exclude from training data. E.g. "2019" excludes the 2019-2020 season. Useful for seasons with bad data quality.
-                        </small>
-                    </div>
-                </div>
-                
-                <!-- Time-Based Calibration -->
-                <div class="config-section">
-                    <h3>Time-Based Calibration</h3>
-                    <div class="checkbox-group">
-                        <label><input type="checkbox" name="use_time_calibration" id="use-time-calibration"> Use Time-Based Calibration</label>
-                    </div>
-                    <div id="calibration-options" style="display: none; margin-top: 15px;">
-                        <div style="margin-bottom: 15px;">
-                            <label for="calibration-method" style="display: block; margin-bottom: 5px;">Calibration Method:</label>
-                            <select id="calibration-method" name="calibration_method" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                                <option value="isotonic">Isotonic</option>
-                                <option value="sigmoid">Sigmoid</option>
-                            </select>
-                        </div>
-                        <div style="margin-bottom: 15px;">
-                            <label for="begin-year" style="display: block; margin-bottom: 5px;">Begin Year (start training from this season):</label>
-                            <input type="number" id="begin-year" name="begin_year" min="2007" max="2030" value="2007" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                            <small style="display: block; margin-top: 5px; color: #666;">
-                                Training data will include only games from this year onwards
-                            </small>
-                        </div>
-                        <div style="margin-bottom: 15px;">
-                            <label for="calibration-years" style="display: block; margin-bottom: 5px;">Calibration Years (comma-separated):</label>
-                            <input type="text" id="calibration-years" name="calibration_years" placeholder="2022,2023" value="2023" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                            <small style="display: block; margin-top: 5px; color: #666;">
-                                Multiple years will be combined for calibration (e.g., "2022,2023")
-                            </small>
-                        </div>
-                        <div>
-                            <label for="evaluation-year" style="display: block; margin-bottom: 5px;">Evaluation Year:</label>
-                            <input type="number" id="evaluation-year" name="evaluation_year" min="2007" max="2030" value="2024" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Action Buttons -->
-                <div class="config-actions">
-                    <button type="button" id="save-config-btn" class="btn btn-secondary">Save Config</button>
-                    <button type="button" id="run-btn" class="btn btn-primary">Run</button>
-                </div>
-            </form>
+
+    <!-- Header Bar -->
+    <div class="config-header-bar">
+        <h2 style="margin: 0;">Model Configurations</h2>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn btn-primary" onclick="openCreateModal()">+ New Config</button>
+            <button type="button" id="create-ensemble-btn" class="btn btn-primary" style="background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);">Create Ensemble</button>
         </div>
-        
-        <!-- Right Side: Results Panel -->
-        <div class="results-panel">
-            <div class="results-header">
-                <h3>Results</h3>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button type="button" id="create-ensemble-btn" class="btn btn-primary" style="background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);">Create Ensemble</button>
-                    <button type="button" id="clear-results-btn" class="btn btn-small">Clear</button>
-                </div>
+    </div>
+
+    <!-- Ensemble Configuration (shown when 2+ models checked) -->
+    <div id="ensemble-config-section" style="display: none; padding: 15px; margin-bottom: 15px; background: #f5f9ff; border: 1px solid #d0e3ff; border-radius: 8px;">
+        <h4 style="margin-top: 0; margin-bottom: 12px; color: #27ae60; font-size: 0.95em;">Create Ensemble</h4>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                <label style="font-size: 0.9em; font-weight: 500;">Name (optional):</label>
+                <input type="text" id="ensemble-name" placeholder="e.g., My 3-model ensemble" style="width: 100%; padding: 6px; border: 1px solid #d0e3ff; border-radius: 4px; font-size: 0.85em; box-sizing: border-box;">
             </div>
-
-            <!-- Ensemble Configuration -->
-            <div id="ensemble-config-section" style="display: none; padding: 15px; margin-bottom: 15px; background: #f5f9ff; border: 1px solid #d0e3ff; border-radius: 8px;">
-                <h4 style="margin-top: 0; margin-bottom: 12px; color: #27ae60; font-size: 0.95em;">Ensemble Meta Features</h4>
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <!-- Derived Features -->
-                    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                            <input type="checkbox" id="ensemble-use-disagree" class="ensemble-meta-checkbox" style="cursor: pointer;">
-                            <span style="font-size: 0.9em;">Include Disagreement Features (disagree_*)</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                            <input type="checkbox" id="ensemble-use-conf" class="ensemble-meta-checkbox" style="cursor: pointer;">
-                            <span style="font-size: 0.9em;">Include Confidence Features (conf_*)</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                            <input type="checkbox" id="ensemble-use-logit" class="ensemble-meta-checkbox" style="cursor: pointer;">
-                            <span style="font-size: 0.9em;">Log-odds Transform (feed logit(p_*) to meta-learner)</span>
-                        </label>
-                    </div>
-
-                    <!-- Custom Features -->
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label style="font-size: 0.9em; font-weight: 500;">Custom Features (comma-separated):</label>
-                        <input type="text" id="ensemble-custom-features" placeholder="e.g., pred_margin, points|season|avg|diff" style="width: 100%; padding: 6px; border: 1px solid #d0e3ff; border-radius: 4px; font-size: 0.85em;">
-                        <span style="font-size: 0.8em; color: #666;">Leave empty for no custom features. Common: pred_margin</span>
-                    </div>
-
-                    <!-- Summary -->
-                    <div id="ensemble-meta-summary" style="font-size: 0.85em; color: #555; padding-top: 8px; border-top: 1px solid #d0e3ff; display: none;">
-                        <strong>Meta features to include:</strong> <span id="ensemble-meta-summary-text">None selected</span>
-                    </div>
-                </div>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="ensemble-use-disagree" class="ensemble-meta-checkbox" style="cursor: pointer;">
+                    <span style="font-size: 0.9em;">Include Disagreement Features (disagree_*)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="ensemble-use-conf" class="ensemble-meta-checkbox" style="cursor: pointer;">
+                    <span style="font-size: 0.9em;">Include Confidence Features (conf_*)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="ensemble-use-logit" class="ensemble-meta-checkbox" style="cursor: pointer;">
+                    <span style="font-size: 0.9em;">Log-odds Transform (feed logit(p_*) to meta-learner)</span>
+                </label>
             </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                <label style="font-size: 0.9em; font-weight: 500;">Custom Features (comma-separated):</label>
+                <input type="text" id="ensemble-custom-features" placeholder="e.g., pred_margin, points|season|avg|diff" style="width: 100%; padding: 6px; border: 1px solid #d0e3ff; border-radius: 4px; font-size: 0.85em;">
+                <span style="font-size: 0.8em; color: #666;">Leave empty for no custom features. Common: pred_margin</span>
+            </div>
+            <div id="ensemble-meta-summary" style="font-size: 0.85em; color: #555; padding-top: 8px; border-top: 1px solid #d0e3ff; display: none;">
+                <strong>Meta features to include:</strong> <span id="ensemble-meta-summary-text">None selected</span>
+            </div>
+        </div>
+    </div>
 
-            <!-- Filter and Sort Controls -->
-            <div class="filter-sort-controls">
+    <!-- Filter and Sort Controls -->
+    <div class="filter-sort-controls">
                 <div class="filter-group">
                     <label for="filter-name">Name:</label>
                     <input type="text" id="filter-name" placeholder="Filter by name..." class="filter-text-input">
@@ -323,6 +159,139 @@
                 <div id="history-list"></div>
                 <div id="history-pagination" class="pagination" style="display: none;"></div>
             </div>
+</div>
+
+<!-- Create/Edit Config Modal -->
+<div id="config-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header">
+            <h3 id="config-modal-title">New Config</h3>
+            <button type="button" class="modal-close" onclick="closeConfigModal()">&times;</button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+            <input type="hidden" id="modal-config-id" value="">
+
+            <!-- Name -->
+            <div class="modal-field">
+                <label for="modal-config-name">Name</label>
+                <input type="text" id="modal-config-name" placeholder="My Config" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+
+            <!-- Model Type (single select) -->
+            <div class="modal-field">
+                <label for="modal-model-type">Model Type</label>
+                <select id="modal-model-type" onchange="updateModalCValuesVisibility()" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="LogisticRegression">Logistic Regression</option>
+                    <option value="GradientBoosting">Gradient Boosting</option>
+                    <option value="SVM">SVM</option>
+                    <option value="RandomForest">Random Forest</option>
+                    <option value="NaiveBayes">Naive Bayes</option>
+                    <option value="NeuralNetwork">Neural Network</option>
+                </select>
+            </div>
+
+            <!-- Feature Sets -->
+            <div class="modal-field">
+                <h3 style="margin-bottom: 10px;">
+                    Feature Sets <span id="modal-feature-count">(0)</span>
+                    <button type="button" id="modal-edit-features-btn" class="edit-icon-btn" title="Edit features by name" style="margin-left: 8px; background: none; border: none; cursor: pointer; padding: 2px 4px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/>
+                        </svg>
+                    </button>
+                </h3>
+                <div class="feature-sets-container" id="modal-feature-sets">
+                    {% for set_name, set_features in feature_sets.items() %}
+                    <div class="feature-set-item">
+                        <div class="feature-set-header">
+                            <input type="checkbox"
+                                   name="modal_feature_sets"
+                                   value="{{ set_name }}"
+                                   id="modal-set-{{ set_name }}"
+                                   class="feature-set-checkbox modal-set-checkbox">
+                            <label for="modal-set-{{ set_name }}" class="feature-set-label">
+                                {{ set_name.replace('_', ' ').title() }}
+                                <span class="feature-count" id="modal-set-count-{{ set_name }}">(0/{{ set_features|length }})</span>
+                            </label>
+                            <button type="button" class="expand-btn" data-set="{{ set_name }}" aria-label="Expand">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M6 3L1 8L11 8L6 3Z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="feature-list" id="modal-features-{{ set_name }}" style="display: none;">
+                            {% for feature in set_features %}
+                            <label class="feature-item{% if feature not in available_features %} feature-unavailable{% endif %}">
+                                <input type="checkbox"
+                                       name="modal_features"
+                                       value="{{ feature }}"
+                                       class="feature-checkbox modal-feature-checkbox"
+                                       data-set="{{ set_name }}"
+                                       {% if feature not in available_features %}disabled title="Not available in training data"{% endif %}>
+                                <span class="feature-name">{{ feature }}</span>
+                                {% if feature not in available_features %}<span class="feature-unavailable-badge" title="Not in MASTER_TRAINING.csv">⚠</span>{% endif %}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- C-Values -->
+            <div class="modal-field" id="modal-c-values-section">
+                <label>C-Values</label>
+                <div class="checkbox-group" style="flex-direction: row; flex-wrap: wrap;">
+                    <label><input type="checkbox" name="modal_c_values" value="0.01"> 0.01</label>
+                    <label><input type="checkbox" name="modal_c_values" value="0.1" checked> 0.1</label>
+                    <label><input type="checkbox" name="modal_c_values" value="1.0" checked> 1.0</label>
+                    <label><input type="checkbox" name="modal_c_values" value="10.0"> 10.0</label>
+                </div>
+            </div>
+
+            <!-- Min Games Played -->
+            <div class="modal-field">
+                <label for="modal-min-games-played">Minimum Prior Same-Season Games Per Team</label>
+                <input type="number" id="modal-min-games-played" value="15" min="0" step="1" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+
+            <!-- Exclude Seasons -->
+            <div class="modal-field">
+                <label for="modal-exclude-seasons">Exclude Seasons (comma-separated start years)</label>
+                <input type="text" id="modal-exclude-seasons" placeholder="e.g. 2019,2020" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+
+            <!-- Time-Based Calibration -->
+            <div class="modal-field">
+                <div class="checkbox-group" style="margin-bottom: 10px;">
+                    <label><input type="checkbox" id="modal-use-time-calibration" onchange="toggleModalCalibration()"> Use Time-Based Calibration</label>
+                </div>
+                <div id="modal-calibration-options" style="display: none; padding-left: 10px; border-left: 3px solid #667eea;">
+                    <div style="margin-bottom: 12px;">
+                        <label for="modal-calibration-method" style="display: block; margin-bottom: 5px;">Calibration Method:</label>
+                        <select id="modal-calibration-method" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="isotonic">Isotonic</option>
+                            <option value="sigmoid">Sigmoid</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label for="modal-begin-year" style="display: block; margin-bottom: 5px;">Begin Year:</label>
+                        <input type="number" id="modal-begin-year" min="2007" max="2030" value="2007" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label for="modal-calibration-years" style="display: block; margin-bottom: 5px;">Calibration Years (comma-separated):</label>
+                        <input type="text" id="modal-calibration-years" placeholder="2022,2023" value="2023" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label for="modal-evaluation-year" style="display: block; margin-bottom: 5px;">Evaluation Year:</label>
+                        <input type="number" id="modal-evaluation-year" min="2007" max="2030" value="2024" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding: 20px; border-top: 1px solid #ddd;">
+            <button type="button" class="btn btn-secondary" onclick="closeConfigModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="modal-save-btn" onclick="saveModal()">Create</button>
         </div>
     </div>
 </div>
@@ -383,23 +352,24 @@
     margin: 0;
 }
 
-.config-layout {
-    display: grid;
-    grid-template-columns: 25% 75%;
-    gap: 30px;
-    min-height: 600px;
-    height: calc(100vh - 80px); /* Full height minus container padding */
+.config-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #eee;
 }
 
-.config-panel {
-    background: #f9f9f9;
-    border-radius: 8px;
-    padding: 25px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    overflow-y: auto;
-    overflow-x: hidden;
-    height: 100%;
-    max-height: calc(100vh - 80px);
+.modal-field {
+    margin-bottom: 20px;
+}
+
+.modal-field > label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: #333;
 }
 
 .config-section {
@@ -725,13 +695,6 @@
     transform: translateX(86px);
 }
 
-.config-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 20px;
-}
-
 .btn {
     padding: 12px 24px;
     border: none;
@@ -764,6 +727,16 @@
 .btn-small {
     padding: 6px 12px;
     font-size: 0.85em;
+}
+
+.btn-train {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-train:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
 }
 
 .btn-danger {
@@ -809,31 +782,11 @@
     100% { transform: scale(1); }
 }
 
-.results-panel {
+.results-content {
     background: white;
     border-radius: 8px;
     padding: 25px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    max-height: calc(100vh - 80px);
-    overflow: hidden; /* Prevent panel itself from scrolling, but allow content inside */
-}
-
-.results-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid #eee;
-}
-
-.results-header h3 {
-    margin: 0;
-    color: #333;
-    font-size: 1.2em;
 }
 
 .filter-sort-controls {
@@ -901,11 +854,6 @@
     box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
 }
 
-
-.results-content {
-    flex: 1;
-    overflow-y: auto;
-}
 
 .results-placeholder {
     color: #999;
@@ -1457,17 +1405,13 @@ function apiUrl(path) {
     return `/${currentLeague}${path}`;
 }
 
-let currentConfig = null;
 let embeddedFeatureSetDefs = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Event listeners
-    document.getElementById('save-config-btn').addEventListener('click', saveConfig);
-    document.getElementById('run-btn').addEventListener('click', runConfig);
-    document.getElementById('clear-results-btn').addEventListener('click', clearResults);
     document.getElementById('create-ensemble-btn').addEventListener('click', createEnsemble);
 
-    // Name filter with debounce (300ms delay so typing feels responsive)
+    // Name filter with debounce
     let nameFilterTimeout = null;
     document.getElementById('filter-name').addEventListener('input', function() {
         clearTimeout(nameFilterTimeout);
@@ -1487,128 +1431,74 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Time-based calibration toggle
-    const calibrationCheckbox = document.getElementById('use-time-calibration');
-    const calibrationOptions = document.getElementById('calibration-options');
-    if (calibrationCheckbox && calibrationOptions) {
-        calibrationCheckbox.addEventListener('change', function() {
-            calibrationOptions.style.display = this.checked ? 'block' : 'none';
-        });
-    }
-    
-    
     // Load history on page load
     loadHistory();
-    
-    // Initialize feature count
-    updateFeatureCount();
 
-    // Cache feature set definitions from the main form so we can render embedded base-model panels (kept for backward compat)
+    // Cache feature set definitions from the modal for embedded base-model panels
     embeddedFeatureSetDefs = buildEmbeddedFeatureSetDefs();
-    
-    // Feature set expansion handlers
-    document.querySelectorAll('.expand-btn').forEach(btn => {
+
+    // Modal: Feature set expansion handlers
+    document.querySelectorAll('#config-modal .expand-btn').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
             e.preventDefault();
             const setName = this.dataset.set;
-            const featureList = document.getElementById(`features-${setName}`);
+            const featureList = document.getElementById(`modal-features-${setName}`);
+            if (!featureList) return;
             const isExpanded = featureList.style.display !== 'none';
-            
             featureList.style.display = isExpanded ? 'none' : 'block';
             this.classList.toggle('expanded', !isExpanded);
         });
     });
-    
-    // Make header clickable to toggle checkbox (but not when clicking expand button)
-    document.querySelectorAll('.feature-set-header').forEach(header => {
+
+    // Modal: Header clickable to toggle checkbox
+    document.querySelectorAll('#config-modal .feature-set-header').forEach(header => {
         header.addEventListener('click', function(e) {
-            // Don't toggle if clicking on the expand button
-            if (e.target.closest('.expand-btn')) {
-                return;
-            }
-            // Don't toggle if clicking directly on checkbox or label (they handle their own clicks)
-            if (e.target.type === 'checkbox' || e.target.closest('label')) {
-                return;
-            }
-            // Otherwise, toggle the checkbox
+            if (e.target.closest('.expand-btn')) return;
+            if (e.target.type === 'checkbox' || e.target.closest('label')) return;
             const checkbox = this.querySelector('.feature-set-checkbox');
-            if (checkbox) {
-                checkbox.click();
-            }
+            if (checkbox) checkbox.click();
         });
     });
-    
-    // Feature set checkbox toggle all features
-    document.querySelectorAll('.feature-set-checkbox').forEach(checkbox => {
+
+    // Modal: Feature set checkbox toggle all features
+    document.querySelectorAll('#config-modal .modal-set-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
             const setName = this.value;
-            const featureCheckboxes = document.querySelectorAll(
-                `.feature-checkbox[data-set="${setName}"]`
-            );
-            
-            featureCheckboxes.forEach(featureCb => {
+            document.querySelectorAll(`#config-modal .modal-feature-checkbox[data-set="${setName}"]`).forEach(featureCb => {
                 featureCb.checked = this.checked;
             });
-            
-            // Update set checkbox state
-            updateSetCheckboxState(setName);
+            updateModalSetCheckboxState(setName);
         });
     });
-    
-    // Individual feature checkbox - update set checkbox state
-    document.querySelectorAll('.feature-checkbox').forEach(checkbox => {
+
+    // Modal: Individual feature checkbox
+    document.querySelectorAll('#config-modal .modal-feature-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
-            const setName = this.dataset.set;
-            updateSetCheckboxState(setName);
+            updateModalSetCheckboxState(this.dataset.set);
         });
     });
-    
-    // Initialize set checkbox states on page load
-    document.querySelectorAll('.feature-set-checkbox').forEach(setCb => {
-        updateSetCheckboxState(setCb.value);
-    });
-    
-    // Feature selection modal handlers
-    const editFeaturesBtn = document.getElementById('edit-features-btn');
+
+    // Feature selection modal (text input) handlers
     const featureModal = document.getElementById('feature-selection-modal');
     const closeFeatureModal = document.getElementById('close-feature-modal');
     const cancelFeatureModal = document.getElementById('cancel-feature-modal');
     const applyFeatureSelection = document.getElementById('apply-feature-selection');
-    
-    if (editFeaturesBtn) {
-        editFeaturesBtn.addEventListener('click', function() {
-            featureModal.style.display = 'block';
-            // Pre-populate with currently selected features
-            const currentFeatures = Array.from(document.querySelectorAll('input[name="features"]:checked')).map(cb => cb.value);
-            document.getElementById('feature-names-input').value = currentFeatures.join('\n');
-        });
-    }
-    
-    if (closeFeatureModal) {
-        closeFeatureModal.addEventListener('click', function() {
-            featureModal.style.display = 'none';
-        });
-    }
-    
-    if (cancelFeatureModal) {
-        cancelFeatureModal.addEventListener('click', function() {
-            featureModal.style.display = 'none';
-        });
-    }
-    
-    // Close modal when clicking outside
-    window.addEventListener('click', function(event) {
-        if (event.target === featureModal) {
-            featureModal.style.display = 'none';
-        }
+
+    document.getElementById('modal-edit-features-btn')?.addEventListener('click', function() {
+        featureModal.style.display = 'block';
+        const currentFeatures = Array.from(document.querySelectorAll('input[name="modal_features"]:checked')).map(cb => cb.value);
+        document.getElementById('feature-names-input').value = currentFeatures.join('\n');
     });
-    
-    if (applyFeatureSelection) {
-        applyFeatureSelection.addEventListener('click', function() {
-            applyFeatureSelectionFromModal();
-        });
-    }
+
+    if (closeFeatureModal) closeFeatureModal.addEventListener('click', () => featureModal.style.display = 'none');
+    if (cancelFeatureModal) cancelFeatureModal.addEventListener('click', () => featureModal.style.display = 'none');
+    if (applyFeatureSelection) applyFeatureSelection.addEventListener('click', applyFeatureSelectionFromModal);
+
+    window.addEventListener('click', function(event) {
+        if (event.target === featureModal) featureModal.style.display = 'none';
+        if (event.target === document.getElementById('config-modal')) closeConfigModal();
+    });
 });
 
 function escapeHtml(input) {
@@ -1629,10 +1519,9 @@ function safeId(input) {
 }
 
 function buildEmbeddedFeatureSetDefs() {
-    // Read the feature set definitions directly from the DOM (rendered by Jinja),
-    // so we don’t duplicate the feature set data structure in JS.
+    // Read the feature set definitions from the config modal DOM (rendered by Jinja)
     const defs = [];
-    const setItems = document.querySelectorAll('#model-config-form .feature-set-item');
+    const setItems = document.querySelectorAll('#config-modal .feature-set-item');
     setItems.forEach(item => {
         const setCb = item.querySelector('.feature-set-checkbox');
         if (!setCb) return;
@@ -1727,9 +1616,17 @@ function renderRankedFeaturesPanel(base, title, arr) {
         <div class="embedded-panel">
             <div class="embedded-subsection-header">
                 <h6 style="margin:0;">${escapeHtml(title)} (${arr.length})</h6>
-                <button type="button" class="embedded-subsection-toggle" onclick="event.stopPropagation(); toggleEmbeddedSubsection(this, '${contentId}')" aria-label="Expand">
-                    <span>Show</span> <span class="chev">▼</span>
-                </button>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <button type="button" class="config-copy-btn" onclick="event.stopPropagation(); copyRankedFeatures(this)" title="Copy rankings" data-rankings='${JSON.stringify(arr).replace(/'/g, "&#39;")}'>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+                            <path d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 4V5" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="embedded-subsection-toggle" onclick="event.stopPropagation(); toggleEmbeddedSubsection(this, '${contentId}')" aria-label="Expand">
+                        <span>Show</span> <span class="chev">▼</span>
+                    </button>
+                </div>
             </div>
             <div class="embedded-subsection-content" id="${contentId}">
                 <div class="rated-features-list" style="max-height: 320px;">
@@ -1777,7 +1674,7 @@ function renderEmbeddedBaseModelPanels(ensembleConfig) {
                         <div class="sub">${escapeHtml(modelType)} • ${escapeHtml(base._id)}</div>
                     </div>
                     <div style="display:flex; gap:8px; align-items:center;">
-                        <button type="button" class="btn btn-small" onclick="event.stopPropagation(); loadConfigIntoForm('${escapeHtml(base._id)}')">Load into editor</button>
+                        <button type="button" class="btn btn-small" onclick="event.stopPropagation(); openEditModal('${escapeHtml(base._id)}')">Edit</button>
                         ${!base.selected ? `<button type="button" class="btn btn-small" onclick="event.stopPropagation(); selectConfig('${escapeHtml(base._id)}')">Select</button>` : `<span class="selected-badge">SELECTED</span>`}
                     </div>
                 </div>
@@ -1803,7 +1700,7 @@ function renderEmbeddedBaseModelPanels(ensembleConfig) {
                             </div>
                         </div>
                     </div>
-                    ${renderRankedFeaturesPanel(base, 'Rated Features (F-Score)', base.features_ranked)}
+                    ${modelType !== 'LogisticRegression' ? renderRankedFeaturesPanel(base, 'Rated Features (F-Score)', base.features_ranked) : ''}
                     ${renderRankedFeaturesPanel(base, 'Rated Features (Importance)', base.features_ranked_by_importance)}
                 </div>
             </div>
@@ -1819,285 +1716,18 @@ function renderEmbeddedBaseModelPanels(ensembleConfig) {
 }
 
 
-function getFormData() {
-    const form = document.getElementById('model-config-form');
-    const formData = new FormData(form);
+// === Modal Feature Set Helpers ===
 
-    // Check if currently selected config is an ensemble
-    const selectedConfig = getSelectedConfig();
-    const isEnsemble = selectedConfig && selectedConfig.ensemble;
-
-    // Get the selected config's _id if one is selected (to update existing config)
-    const selectedConfigId = selectedConfig ? selectedConfig._id : null;
-
-    if (isEnsemble) {
-        // Ensemble configuration - use selected model types as meta-model type
-        const ensembleModelTypes = Array.from(form.querySelectorAll('input[name="model_types"]:checked')).map(cb => cb.value);
-        const ensembleCValues = Array.from(form.querySelectorAll('input[name="c_values"]:checked')).map(cb => parseFloat(cb.value));
-
-        return {
-            config_id: selectedConfigId,  // Include selected config ID
-            ensemble: true,
-            model_types: ensembleModelTypes.length > 0 ? ensembleModelTypes : ['LogisticRegression'], // Meta-model type
-            c_values: ensembleCValues.length > 0 ? ensembleCValues : [0.1], // Meta-model C-value
-            ensemble_models: selectedConfig.ensemble_models || [],
-            ensemble_meta_features: selectedConfig.ensemble_meta_features || [],
-            ensemble_use_disagree: selectedConfig.ensemble_use_disagree || false,
-            ensemble_use_conf: selectedConfig.ensemble_use_conf || false,
-            ensemble_use_logit: selectedConfig.ensemble_use_logit || false,
-            // Include time calibration settings from ensemble config
-            use_time_calibration: selectedConfig.use_time_calibration || false,
-            calibration_method: selectedConfig.calibration_method || 'isotonic',
-            begin_year: selectedConfig.begin_year || null,
-            calibration_years: selectedConfig.calibration_years || null,
-            evaluation_year: selectedConfig.evaluation_year || null,
-            min_games_played: selectedConfig.min_games_played || 15,
-            exclude_seasons: selectedConfig.exclude_seasons || null
-        };
-    }
-
-    // Regular model configuration
-    // Get calibration settings
-    const useMaster = document.getElementById('use-master')?.checked || false;
-    const useTimeCalibration = document.getElementById('use-time-calibration')?.checked || false;
-    const calibrationMethod = document.getElementById('calibration-method')?.value || 'isotonic';
-    const beginYear = document.getElementById('begin-year')?.value ? parseInt(document.getElementById('begin-year').value) : null;
-    const calibrationYearsStr = document.getElementById('calibration-years')?.value || '';
-    const calibrationYears = calibrationYearsStr ? calibrationYearsStr.split(',').map(y => parseInt(y.trim())).filter(y => !isNaN(y)) : null;
-    const evaluationYear = document.getElementById('evaluation-year')?.value ? parseInt(document.getElementById('evaluation-year').value) : null;
-
-    // Get injury feature settings
-    const includeInjuries = document.getElementById('include-injuries')?.checked || false;
-    const recencyDecayK = parseFloat(document.getElementById('recency-decay-k')?.value || '15.0');
-    // Min games played
-    const minGamesPlayed = parseInt(document.getElementById('min-games-played')?.value || '15');
-    // Exclude seasons
-    const excludeSeasonsStr = document.getElementById('exclude-seasons')?.value || '';
-    const excludeSeasonsArray = excludeSeasonsStr ? excludeSeasonsStr.split(',').map(s => parseInt(s.trim())).filter(s => !isNaN(s)) : null;
-
-    return {
-        config_id: selectedConfigId,  // Include selected config ID to update existing config
-        use_master: useMaster,
-        model_types: Array.from(form.querySelectorAll('input[name="model_types"]:checked')).map(cb => cb.value),
-        feature_sets: Array.from(form.querySelectorAll('input[name="feature_sets"]:checked')).map(cb => cb.value),
-        features: Array.from(form.querySelectorAll('input[name="features"]:checked')).map(cb => cb.value),
-        c_values: Array.from(form.querySelectorAll('input[name="c_values"]:checked')).map(cb => parseFloat(cb.value)),
-        use_time_calibration: useTimeCalibration,
-        calibration_method: useTimeCalibration ? calibrationMethod : null,
-        begin_year: useTimeCalibration ? beginYear : null,
-        calibration_years: useTimeCalibration ? calibrationYears : null,
-        evaluation_year: useTimeCalibration ? evaluationYear : null,
-        min_games_played: isNaN(minGamesPlayed) ? 15 : minGamesPlayed,
-        exclude_seasons: excludeSeasonsArray
-    };
-}
-
-function setFormData(config) {
-    // Check if this is an ensemble config
-    const isEnsemble = config.ensemble === true;
-
-    // Normalize model_type(s): stored configs have singular model_type, form uses model_types array
-    let modelTypesToCheck = [];
-    if (config.model_types && Array.isArray(config.model_types)) {
-        modelTypesToCheck = config.model_types;
-    } else if (config.model_type) {
-        modelTypesToCheck = [config.model_type];
-    }
-
-    // Set model types (for ensembles, this is the meta-model type)
-    document.querySelectorAll('input[name="model_types"]').forEach(cb => {
-        cb.checked = modelTypesToCheck.includes(cb.value);
-    });
-    
-    if (isEnsemble) {
-        // For ensembles, clear feature-related UI elements since they don't apply
-        document.querySelectorAll('input[name="feature_sets"]').forEach(cb => {
-            cb.checked = false;
-            cb.disabled = true;  // Disable feature sets for ensembles
-        });
-        document.querySelectorAll('input[name="features"]').forEach(cb => {
-            cb.checked = false;
-            cb.disabled = true;  // Disable individual features for ensembles
-        });
-        
-        // Update set checkbox states to show unchecked
-        document.querySelectorAll('.feature-set-checkbox').forEach(setCb => {
-            updateSetCheckboxState(setCb.value);
-        });
-        
-        // Hide missing features section for ensembles
-        const missingFeaturesSection = document.getElementById('missing-features-section');
-        if (missingFeaturesSection) {
-            missingFeaturesSection.style.display = 'none';
-        }
-        
-        console.log(`setFormData: Loaded ensemble config with meta-model type: ${modelTypesToCheck}`);
-    } else {
-        // Regular model configuration - enable feature controls
-        document.querySelectorAll('input[name="feature_sets"]').forEach(cb => {
-            cb.disabled = false;  // Enable feature sets
-        });
-        document.querySelectorAll('input[name="features"]').forEach(cb => {
-            cb.disabled = false;  // Enable individual features
-        });
-        
-        // Set feature sets
-        document.querySelectorAll('input[name="feature_sets"]').forEach(cb => {
-            const isChecked = config.feature_sets && config.feature_sets.includes(cb.value);
-            cb.checked = isChecked;
-            // Also toggle all features in the set
-            const setName = cb.value;
-            document.querySelectorAll(`.feature-checkbox[data-set="${setName}"]`).forEach(featureCb => {
-                featureCb.checked = isChecked;
-            });
-            // Update indeterminate state
-            updateSetCheckboxState(setName);
-        });
-        
-        // Set individual features (if specified)
-        if (config.features && Array.isArray(config.features)) {
-            // Get all available feature checkboxes (from master CSV)
-            const availableFeatureCheckboxes = Array.from(document.querySelectorAll('input[name="features"]'));
-            const availableFeatureNames = new Set(availableFeatureCheckboxes.map(cb => cb.value));
-            
-            // Track which features were found and checked
-            let checkedCount = 0;
-            availableFeatureCheckboxes.forEach(cb => {
-                if (config.features.includes(cb.value)) {
-                    cb.checked = true;
-                    checkedCount++;
-                }
-            });
-            
-            // Identify missing features (in config but not in master CSV)
-            const missingFeatures = config.features.filter(f => !availableFeatureNames.has(f));
-            
-            // Display missing features section if there are any
-            const missingFeaturesSection = document.getElementById('missing-features-section');
-            const missingFeaturesList = document.getElementById('missing-features-list');
-            const missingFeaturesCount = document.getElementById('missing-features-count');
-            
-            if (missingFeatures.length > 0) {
-                missingFeaturesSection.style.display = 'block';
-                missingFeaturesCount.textContent = `(${missingFeatures.length})`;
-                
-                // Populate missing features list
-                missingFeaturesList.innerHTML = missingFeatures.map((feature, index) => 
-                    `<div style="padding: 4px; border-bottom: 1px solid #eee;">${index + 1}. ${feature}</div>`
-                ).join('');
-            } else {
-                missingFeaturesSection.style.display = 'none';
-            }
-            
-            // Update set checkbox states based on individual features
-            document.querySelectorAll('.feature-set-checkbox').forEach(setCb => {
-                updateSetCheckboxState(setCb.value);
-            });
-            
-            console.log(`setFormData: Config has ${config.features.length} features. ${checkedCount} checked (available in CSV). ${missingFeatures.length} missing from CSV.`);
-            if (missingFeatures.length > 0) {
-                console.warn('Missing features:', missingFeatures);
-            }
-        }
-        
-        console.log(`setFormData: Loaded regular model config with ${modelTypesToCheck.length} model types`);
-    }
-
-    // Normalize c_values: stored configs have singular best_c_value, form uses c_values array
-    let cValuesToCheck = [];
-    if (config.c_values && Array.isArray(config.c_values)) {
-        cValuesToCheck = config.c_values.map(v => parseFloat(v));
-    } else if (config.best_c_value !== null && config.best_c_value !== undefined) {
-        cValuesToCheck = [parseFloat(config.best_c_value)];
-    }
-
-    // Set C-values
-    document.querySelectorAll('input[name="c_values"]').forEach(cb => {
-        cb.checked = cValuesToCheck.includes(parseFloat(cb.value));
-    });
-    
-    // Set calibration settings
-    const useMasterCheckbox = document.getElementById('use-master');
-    if (useMasterCheckbox) {
-        // Default to checked when value is missing/undefined to honor UX requirement
-        const val = (config && typeof config.use_master !== 'undefined' && config.use_master !== null)
-            ? Boolean(config.use_master)
-            : true;
-        useMasterCheckbox.checked = val;
-    }
-    
-    const calibrationCheckbox = document.getElementById('use-time-calibration');
-    const calibrationOptions = document.getElementById('calibration-options');
-    if (calibrationCheckbox) {
-        calibrationCheckbox.checked = config.use_time_calibration || false;
-        if (calibrationOptions) {
-            calibrationOptions.style.display = calibrationCheckbox.checked ? 'block' : 'none';
-        }
-    }
-    
-    // Set calibration method (only if calibration is enabled)
-    if (config.use_time_calibration && config.calibration_method && document.getElementById('calibration-method')) {
-        document.getElementById('calibration-method').value = config.calibration_method;
-    }
-    
-    // Set begin_year (only if calibration is enabled)
-    if (config.use_time_calibration && config.begin_year !== null && config.begin_year !== undefined && document.getElementById('begin-year')) {
-        document.getElementById('begin-year').value = config.begin_year;
-    }
-    
-    // Set calibration_years (only if calibration is enabled)
-    if (config.use_time_calibration && document.getElementById('calibration-years')) {
-        const calYearsInput = document.getElementById('calibration-years');
-        if (config.calibration_years) {
-            // Handle both old format (single year) and new format (list)
-            if (Array.isArray(config.calibration_years)) {
-                calYearsInput.value = config.calibration_years.join(',');
-            } else {
-                calYearsInput.value = config.calibration_years.toString();
-            }
-        } else if (config.calibration_year !== null && config.calibration_year !== undefined) {
-            // Backward compatibility: if old calibration_year exists but not calibration_years
-            calYearsInput.value = config.calibration_year.toString();
-        }
-    }
-    
-    // Set evaluation_year (only if calibration is enabled)
-    if (config.use_time_calibration && config.evaluation_year !== null && config.evaluation_year !== undefined && document.getElementById('evaluation-year')) {
-        document.getElementById('evaluation-year').value = config.evaluation_year;
-    }
-    
-    // Set min_games_played
-    const mgpInput = document.getElementById('min-games-played');
-    if (mgpInput) {
-        mgpInput.value = (config && typeof config.min_games_played !== 'undefined' && config.min_games_played !== null)
-            ? parseInt(config.min_games_played)
-            : 15;
-    }
-
-    // Set exclude_seasons
-    const esInput = document.getElementById('exclude-seasons');
-    if (esInput) {
-        esInput.value = (config && config.exclude_seasons && Array.isArray(config.exclude_seasons))
-            ? config.exclude_seasons.join(', ')
-            : '';
-    }
-
-    // Update feature count
-    updateFeatureCount();
-}
-
-function updateSetCheckboxState(setName) {
-    const setCheckbox = document.getElementById(`set-${setName}`);
-    const featureCheckboxes = document.querySelectorAll(`.feature-checkbox[data-set="${setName}"]`);
+function updateModalSetCheckboxState(setName) {
+    const setCheckbox = document.getElementById(`modal-set-${setName}`);
+    if (!setCheckbox) return;
+    const featureCheckboxes = document.querySelectorAll(`#config-modal .modal-feature-checkbox[data-set="${setName}"]`);
     const checkedCount = Array.from(featureCheckboxes).filter(cb => cb.checked).length;
     const totalCount = featureCheckboxes.length;
-    
-    // Update the count display
-    const countDisplay = document.getElementById(`set-count-${setName}`);
-    if (countDisplay) {
-        countDisplay.textContent = `(${checkedCount}/${totalCount})`;
-    }
-    
+
+    const countDisplay = document.getElementById(`modal-set-count-${setName}`);
+    if (countDisplay) countDisplay.textContent = `(${checkedCount}/${totalCount})`;
+
     if (checkedCount === 0) {
         setCheckbox.checked = false;
         setCheckbox.indeterminate = false;
@@ -2108,17 +1738,248 @@ function updateSetCheckboxState(setName) {
         setCheckbox.checked = false;
         setCheckbox.indeterminate = true;
     }
-    
-    // Update total feature count
-    updateFeatureCount();
+    updateModalFeatureCount();
 }
 
-function updateFeatureCount() {
-    const checkedFeatures = Array.from(document.querySelectorAll('input[name="features"]:checked'));
-    const count = checkedFeatures.length;
-    const display = document.getElementById('feature-count-display');
-    if (display) {
-        display.textContent = `(${count})`;
+function updateModalFeatureCount() {
+    const count = document.querySelectorAll('input[name="modal_features"]:checked').length;
+    const display = document.getElementById('modal-feature-count');
+    if (display) display.textContent = `(${count})`;
+}
+
+function updateModalCValuesVisibility() {
+    const modelType = document.getElementById('modal-model-type')?.value || '';
+    const section = document.getElementById('modal-c-values-section');
+    if (section) {
+        const showC = ['LogisticRegression', 'SVM', 'GradientBoosting'].includes(modelType);
+        section.style.display = showC ? 'block' : 'none';
+    }
+}
+
+function toggleModalCalibration() {
+    const checked = document.getElementById('modal-use-time-calibration')?.checked || false;
+    const opts = document.getElementById('modal-calibration-options');
+    if (opts) opts.style.display = checked ? 'block' : 'none';
+}
+
+// === Create/Edit Config Modal ===
+
+function openCreateModal() {
+    document.getElementById('config-modal-title').textContent = 'New Config';
+    document.getElementById('modal-config-id').value = '';
+    document.getElementById('modal-config-name').value = '';
+    document.getElementById('modal-model-type').value = 'LogisticRegression';
+
+    // Reset feature checkboxes
+    document.querySelectorAll('input[name="modal_feature_sets"]').forEach(cb => { cb.checked = false; cb.indeterminate = false; });
+    document.querySelectorAll('input[name="modal_features"]').forEach(cb => { cb.checked = false; });
+
+    // Reset C-values to defaults
+    document.querySelectorAll('input[name="modal_c_values"]').forEach(cb => {
+        cb.checked = (cb.value === '0.1' || cb.value === '1.0');
+    });
+
+    // Reset other fields
+    document.getElementById('modal-min-games-played').value = 15;
+    document.getElementById('modal-exclude-seasons').value = '';
+    document.getElementById('modal-use-time-calibration').checked = false;
+    document.getElementById('modal-calibration-options').style.display = 'none';
+    document.getElementById('modal-calibration-method').value = 'isotonic';
+    document.getElementById('modal-begin-year').value = 2007;
+    document.getElementById('modal-calibration-years').value = '2023';
+    document.getElementById('modal-evaluation-year').value = 2024;
+
+    // Update counts
+    document.querySelectorAll('#config-modal .modal-set-checkbox').forEach(cb => updateModalSetCheckboxState(cb.value));
+    updateModalCValuesVisibility();
+
+    document.getElementById('modal-save-btn').textContent = 'Create';
+    document.getElementById('config-modal').style.display = 'block';
+}
+
+function openEditModal(configId) {
+    const config = allHistoryConfigs.find(c => c._id === configId);
+    if (!config) { alert('Config not found'); return; }
+
+    document.getElementById('config-modal-title').textContent = 'Edit Config';
+    document.getElementById('modal-config-id').value = configId;
+    document.getElementById('modal-config-name').value = config.name || '';
+    document.getElementById('modal-model-type').value = config.model_type || 'LogisticRegression';
+
+    // Set feature checkboxes
+    document.querySelectorAll('input[name="modal_features"]').forEach(cb => {
+        cb.checked = config.features && config.features.includes(cb.value);
+    });
+
+    // Update set checkbox states
+    document.querySelectorAll('#config-modal .modal-set-checkbox').forEach(cb => updateModalSetCheckboxState(cb.value));
+
+    // Set C-values
+    let cValues = [];
+    if (config.c_values && Array.isArray(config.c_values)) {
+        cValues = config.c_values.map(v => parseFloat(v));
+    } else if (config.best_c_value != null) {
+        cValues = [parseFloat(config.best_c_value)];
+    }
+    document.querySelectorAll('input[name="modal_c_values"]').forEach(cb => {
+        cb.checked = cValues.includes(parseFloat(cb.value));
+    });
+
+    // Set other fields
+    document.getElementById('modal-min-games-played').value = config.min_games_played ?? 15;
+    document.getElementById('modal-exclude-seasons').value = (config.exclude_seasons && Array.isArray(config.exclude_seasons)) ? config.exclude_seasons.join(', ') : '';
+
+    // Calibration
+    const useCal = config.use_time_calibration || false;
+    document.getElementById('modal-use-time-calibration').checked = useCal;
+    document.getElementById('modal-calibration-options').style.display = useCal ? 'block' : 'none';
+    if (useCal) {
+        document.getElementById('modal-calibration-method').value = config.calibration_method || 'isotonic';
+        document.getElementById('modal-begin-year').value = config.begin_year || 2007;
+        const calYears = config.calibration_years || config.calibration_year;
+        document.getElementById('modal-calibration-years').value = Array.isArray(calYears) ? calYears.join(',') : (calYears || '2023');
+        document.getElementById('modal-evaluation-year').value = config.evaluation_year || 2024;
+    }
+
+    updateModalCValuesVisibility();
+    document.getElementById('modal-save-btn').textContent = 'Update';
+    document.getElementById('config-modal').style.display = 'block';
+}
+
+function closeConfigModal() {
+    document.getElementById('config-modal').style.display = 'none';
+}
+
+function getModalFormData() {
+    const name = document.getElementById('modal-config-name').value.trim();
+    const modelType = document.getElementById('modal-model-type').value;
+    const features = Array.from(document.querySelectorAll('input[name="modal_features"]:checked')).map(cb => cb.value);
+    const cValues = Array.from(document.querySelectorAll('input[name="modal_c_values"]:checked')).map(cb => parseFloat(cb.value));
+    const minGamesPlayed = parseInt(document.getElementById('modal-min-games-played').value) || 15;
+    const excludeSeasonsStr = document.getElementById('modal-exclude-seasons').value.trim();
+    const excludeSeasons = excludeSeasonsStr ? excludeSeasonsStr.split(',').map(s => parseInt(s.trim())).filter(s => !isNaN(s)) : null;
+    const useTimeCal = document.getElementById('modal-use-time-calibration').checked;
+
+    const data = { name, model_type: modelType, features, c_values: cValues, min_games_played: minGamesPlayed, exclude_seasons: excludeSeasons, use_time_calibration: useTimeCal };
+
+    if (useTimeCal) {
+        data.calibration_method = document.getElementById('modal-calibration-method').value;
+        data.begin_year = parseInt(document.getElementById('modal-begin-year').value) || null;
+        const calYearsStr = document.getElementById('modal-calibration-years').value;
+        data.calibration_years = calYearsStr ? calYearsStr.split(',').map(y => parseInt(y.trim())).filter(y => !isNaN(y)) : null;
+        data.evaluation_year = parseInt(document.getElementById('modal-evaluation-year').value) || null;
+    }
+
+    return data;
+}
+
+async function saveModal() {
+    const configId = document.getElementById('modal-config-id').value;
+    const data = getModalFormData();
+
+    if (!data.name) { alert('Please enter a config name.'); return; }
+    if (data.features.length === 0) { alert('Please select at least one feature.'); return; }
+
+    try {
+        let response;
+        if (configId) {
+            // Edit existing
+            response = await fetch(apiUrl(`/api/model-configs/${configId}`), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+        } else {
+            // Create new
+            response = await fetch(apiUrl('/api/model-configs/create'), {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+        }
+
+        const result = await response.json();
+        if (result.success) {
+            closeConfigModal();
+            loadHistory();
+            // Auto-train after creating a new config
+            if (!configId && result.config_id) {
+                trainConfig(result.config_id);
+            }
+        } else {
+            alert('Error: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function cloneConfig(configId) {
+    try {
+        const response = await fetch(apiUrl(`/api/model-configs/${configId}/clone`), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const data = await response.json();
+        if (data.success) {
+            loadHistory();
+        } else {
+            alert('Error cloning: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function trainConfig(configId) {
+    // Stop any existing polling
+    if (jobPollInterval) { clearInterval(jobPollInterval); jobPollInterval = null; }
+
+    // Show progress bar
+    const progressContainer = document.getElementById('job-progress-container');
+    const progressBar = document.getElementById('job-progress-bar');
+    const progressPercent = document.getElementById('job-progress-percent');
+    const progressMessage = document.getElementById('job-progress-message');
+    const jobError = document.getElementById('job-error');
+
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressPercent.textContent = '0%';
+    progressMessage.textContent = 'Initializing training (fresh from master CSV)...';
+    jobError.style.display = 'none';
+
+    try {
+        const response = await fetch(apiUrl('/api/model-config/train'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ config_id: configId })
+        });
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            progressContainer.style.display = 'none';
+            alert('Server returned non-JSON response.');
+            return;
+        }
+
+        if (!response.ok) {
+            progressContainer.style.display = 'none';
+            alert('Error: ' + (data.error || `Server error: ${response.status}`));
+            return;
+        }
+
+        if (data.success && data.job_id) {
+            currentJobId = data.job_id;
+            startJobPolling(currentJobId);
+        } else {
+            progressContainer.style.display = 'none';
+            alert('Training error: ' + (data.error || 'No job_id returned'));
+        }
+    } catch (error) {
+        progressContainer.style.display = 'none';
+        alert('Error: ' + error.message);
     }
 }
 
@@ -2127,267 +1988,47 @@ function applyFeatureSelectionFromModal() {
     const input = document.getElementById('feature-names-input');
     const clearAndReselect = document.getElementById('clear-and-reselect').checked;
     const featureText = input.value.trim();
-    
-    if (!featureText) {
-        alert('Please enter at least one feature name.');
-        return;
-    }
-    
-    // Parse feature names (comma or newline separated)
-    const featureNames = featureText
-        .split(/[,\n]/)
-        .map(name => name.trim())
-        .filter(name => name.length > 0);
-    
-    if (featureNames.length === 0) {
-        alert('No valid feature names found.');
-        return;
-    }
-    
-    // Get all available feature checkboxes
-    const allFeatureCheckboxes = document.querySelectorAll('input[name="features"]');
+
+    if (!featureText) { alert('Please enter at least one feature name.'); return; }
+
+    const featureNames = featureText.split(/[,\n]/).map(name => name.trim()).filter(name => name.length > 0);
+    if (featureNames.length === 0) { alert('No valid feature names found.'); return; }
+
+    // Use modal_features checkboxes
+    const allFeatureCheckboxes = document.querySelectorAll('input[name="modal_features"]');
     const availableFeatureNames = Array.from(allFeatureCheckboxes).map(cb => cb.value);
-    
-    // Find matching features (case-insensitive)
+
     const matchedFeatures = [];
     const notFoundFeatures = [];
-    
     featureNames.forEach(inputName => {
-        const found = availableFeatureNames.find(availableName => 
-            availableName.toLowerCase() === inputName.toLowerCase()
-        );
-        if (found) {
-            matchedFeatures.push(found);
-        } else {
-            notFoundFeatures.push(inputName);
-        }
+        const found = availableFeatureNames.find(n => n.toLowerCase() === inputName.toLowerCase());
+        if (found) matchedFeatures.push(found);
+        else notFoundFeatures.push(inputName);
     });
-    
-    // Show warning for features not found
+
     if (notFoundFeatures.length > 0) {
-        const notFoundMsg = `Warning: ${notFoundFeatures.length} feature(s) not found: ${notFoundFeatures.join(', ')}`;
-        console.warn(notFoundMsg);
-        if (notFoundFeatures.length <= 5) {
-            alert(notFoundMsg);
-        } else {
-            alert(`Warning: ${notFoundFeatures.length} features not found. Check console for details.`);
-        }
+        alert(`Warning: ${notFoundFeatures.length} feature(s) not found: ${notFoundFeatures.slice(0, 5).join(', ')}${notFoundFeatures.length > 5 ? '...' : ''}`);
     }
-    
-    if (matchedFeatures.length === 0) {
-        alert('No matching features found. Please check your feature names.');
-        return;
-    }
-    
-    // Apply selection
+    if (matchedFeatures.length === 0) { alert('No matching features found.'); return; }
+
     if (clearAndReselect) {
-        // Clear all features first
-        allFeatureCheckboxes.forEach(cb => {
-            cb.checked = false;
-        });
+        allFeatureCheckboxes.forEach(cb => { cb.checked = false; });
     }
-    
-    // Check the matched features
     allFeatureCheckboxes.forEach(cb => {
-        if (matchedFeatures.includes(cb.value)) {
-            cb.checked = true;
-        }
+        if (matchedFeatures.includes(cb.value)) cb.checked = true;
     });
-    
-    // Update all set checkbox states
-    document.querySelectorAll('.feature-set-checkbox').forEach(setCb => {
-        updateSetCheckboxState(setCb.value);
+
+    // Update set checkbox states in modal
+    document.querySelectorAll('#config-modal .modal-set-checkbox').forEach(setCb => {
+        updateModalSetCheckboxState(setCb.value);
     });
-    
-    // Update feature count
-    updateFeatureCount();
-    
-    // Close modal
+
     document.getElementById('feature-selection-modal').style.display = 'none';
-    
-    console.log(`Applied ${matchedFeatures.length} feature(s)${clearAndReselect ? ' (cleared all first)' : ' (added to existing)'}`);
-}
-
-async function saveConfig() {
-    const config = getFormData();
-    
-    try {
-        const response = await fetch(apiUrl('/api/model-config/save'), {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(config)
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            console.log('Config saved successfully');
-            currentConfig = config;
-        } else {
-            console.error(`Error saving config: ${data.error}`);
-            alert(`Error saving config: ${data.error}`);
-        }
-    } catch (error) {
-        console.error(`Error: ${error.message}`);
-        alert(`Error: ${error.message}`);
-    }
-}
-
-async function loadLastConfig() {
-    try {
-        const response = await fetch(apiUrl('/api/model-config/load'));
-        const data = await response.json();
-        
-        if (data.success && data.config) {
-            setFormData(data.config);
-            currentConfig = data.config;
-            console.log('Last config loaded');
-        } else {
-            console.log('No saved config found');
-        }
-    } catch (error) {
-        console.error(`Error loading config: ${error.message}`);
-        alert(`Error loading config: ${error.message}`);
-    }
+    console.log(`Applied ${matchedFeatures.length} feature(s)`);
 }
 
 let currentJobId = null;
 let jobPollInterval = null;
-
-function getSelectedConfig() {
-    // Find the selected config from the history list
-    const selectedHistoryItem = document.querySelector('.history-item.selected');
-    if (selectedHistoryItem) {
-        const configId = selectedHistoryItem.dataset.configId;
-        // Return the cached config object if available
-        return allHistoryConfigs.find(config => config._id === configId);
-    }
-    return null;
-}
-
-async function runConfig() {
-    const config = getFormData();
-    
-    // Check if this is ensemble training
-    const isEnsemble = config.ensemble === true;
-    
-    // Debug: Log form data
-    if (isEnsemble) {
-        console.log('Ensemble training data being sent:', {
-            model_types: config.model_types, // Meta-model type
-            c_values: config.c_values, // Meta-model C-value
-            ensemble_models: config.ensemble_models,
-            ensemble_meta_features: config.ensemble_meta_features,
-            ensemble_use_disagree: config.ensemble_use_disagree,
-            ensemble_use_conf: config.ensemble_use_conf,
-            ensemble_use_logit: config.ensemble_use_logit,
-            use_time_calibration: config.use_time_calibration,
-            calibration_method: config.calibration_method,
-            begin_year: config.begin_year,
-            calibration_years: config.calibration_years,
-            evaluation_year: config.evaluation_year
-        });
-    } else {
-        console.log('Form data being sent:', {
-            use_time_calibration: config.use_time_calibration,
-            calibration_method: config.calibration_method,
-            begin_year: config.begin_year,
-            calibration_years: config.calibration_years,
-            evaluation_year: config.evaluation_year
-        });
-    }
-    
-    if (config.model_types.length === 0) {
-        const errorMsg = isEnsemble 
-            ? 'Please select at least one meta-model type (Logistic Regression, SVM, etc.)'
-            : 'Please select at least one model type';
-        alert(errorMsg);
-        return;
-    }
-    
-    // For ensembles, validate we have base models
-    if (isEnsemble && (!config.ensemble_models || config.ensemble_models.length < 2)) {
-        alert('Ensemble must have at least 2 base models. Please select the ensemble first and ensure it has base models.');
-        return;
-    }
-    
-    // Stop any existing polling
-    if (jobPollInterval) {
-        clearInterval(jobPollInterval);
-        jobPollInterval = null;
-    }
-    
-    // Show progress bar
-    const progressContainer = document.getElementById('job-progress-container');
-    const progressBar = document.getElementById('job-progress-bar');
-    const progressPercent = document.getElementById('job-progress-percent');
-    const progressMessage = document.getElementById('job-progress-message');
-    const jobError = document.getElementById('job-error');
-    
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressPercent.textContent = '0%';
-    progressMessage.textContent = isEnsemble ? 'Initializing ensemble training...' : 'Initializing training...';
-    jobError.style.display = 'none';
-    
-    console.log(`Starting ${isEnsemble ? 'ensemble' : 'regular'} training job...`);
-    
-    try {
-        const response = await fetch(apiUrl('/api/model-config/train'), {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(config)
-        });
-        
-        console.log('Response status:', response.status);
-        
-        // Try to parse JSON response (even for error status codes)
-        let data;
-        try {
-            const responseText = await response.text();
-            console.log('Response text:', responseText);
-            data = JSON.parse(responseText);
-        } catch (e) {
-            // If response isn't JSON, treat as text error
-            const errorMsg = `Server returned non-JSON response. Status: ${response.status}`;
-            console.error('Failed to parse response as JSON:', e);
-            progressContainer.style.display = 'none';
-            alert(`Error: ${errorMsg}`);
-            return;
-        }
-        
-        if (!response.ok) {
-            const errorMsg = data.error || `Server error: ${response.status}`;
-            const traceback = data.traceback ? `\n\nTraceback:\n${data.traceback}` : '';
-            console.error('Response error:', data);
-            progressContainer.style.display = 'none';
-            alert(`Error: ${errorMsg}${traceback}`);
-            return;
-        }
-        
-        console.log('Response data:', data);
-        
-        if (data.success && data.job_id) {
-            currentJobId = data.job_id;
-            console.log('Job started with ID:', currentJobId);
-            
-            // Start polling for job status
-            startJobPolling(currentJobId);
-            
-            // Auto-save config after starting job
-            currentConfig = config;
-            await saveConfig();
-        } else {
-            const errorMsg = data.error || 'Unknown error: No job_id returned';
-            console.error(`Training error: ${errorMsg}`, data);
-            progressContainer.style.display = 'none';
-            alert(`Training error: ${errorMsg}`);
-        }
-    } catch (error) {
-        console.error('Error in runConfig:', error);
-        progressContainer.style.display = 'none';
-        alert(`Error: ${error.message}`);
-    }
-}
 
 function startJobPolling(jobId) {
     // Clear any existing interval
@@ -2468,11 +2109,6 @@ async function pollJobStatus(jobId) {
     }
 }
 
-function clearResults() {
-    document.getElementById('history-list').innerHTML = '<p class="results-placeholder">No history found.</p>';
-    loadHistory();
-}
-
 // History Management
 let historyPage = 1;
 const historyPageSize = 10;
@@ -2519,19 +2155,6 @@ async function loadHistory() {
 
             // Apply filters and sorting, then display
             applyFiltersAndSort();
-            
-            // Load selected config into form on initial page load (if one is selected)
-            // Use setTimeout to ensure DOM is fully ready after applyFiltersAndSort displays the page
-            setTimeout(() => {
-                const selectedConfig = allHistoryConfigs.find(cfg => cfg && cfg.selected === true);
-                if (selectedConfig) {
-                    console.log('Found selected config, loading into form:', selectedConfig._id, 'with', selectedConfig.features?.length || 0, 'features');
-                    loadConfigIntoForm(selectedConfig._id);
-                } else {
-                    // Clear missing features display if no config is selected
-                    clearMissingFeaturesDisplay();
-                }
-            }, 100);
         } else {
             console.warn('No configs in response:', data);
             if (historyList) {
@@ -2822,11 +2445,14 @@ function createHistoryItem(config) {
             </div>
             <div class="history-item-actions">
                 ${!config.ensemble ? `<input type="checkbox" class="ensemble-checkbox" data-config-id="${config._id}" title="Include in ensemble" style="margin-right: 8px;">` : ''}
-                ${!config.selected ? `<button class="btn btn-small" onclick="selectConfig('${config._id}')">Select</button>` : ''}
-                ${config.ensemble ? `<button class="btn btn-small" onclick="showEditEnsembleModal('${config._id}')" title="Edit meta-model features and retrain">Edit Meta</button>` : ''}
-                ${config.features_ranked && Array.isArray(config.features_ranked) && config.features_ranked.length > 0 ? `<button class="btn btn-small" onclick="showFeatureTree('${config._id}')">Feature Tree</button>` : ''}
+                ${!config.ensemble ? `<button class="btn btn-small" onclick="event.stopPropagation(); openEditModal('${config._id}')" title="Edit config settings">Edit</button>` : ''}
+                <button class="btn btn-small btn-train" onclick="event.stopPropagation(); trainConfig('${config._id}')" title="Train fresh from master CSV">Train</button>
+                ${!config.selected ? `<button class="btn btn-small" onclick="event.stopPropagation(); selectConfig('${config._id}')">Select</button>` : ''}
+                <button class="btn btn-small" onclick="event.stopPropagation(); cloneConfig('${config._id}')" title="Clone this config">Clone</button>
+                ${config.ensemble ? `<button class="btn btn-small" onclick="event.stopPropagation(); showEditEnsembleModal('${config._id}')" title="Edit meta-model features and retrain">Edit Meta</button>` : ''}
+                ${config.features_ranked && Array.isArray(config.features_ranked) && config.features_ranked.length > 0 ? `<button class="btn btn-small" onclick="event.stopPropagation(); showFeatureTree('${config._id}')">Feature Tree</button>` : ''}
                 ${config.training_csv ? `<a class="btn btn-small" href="/api/model-configs/${config._id}/download">Download CSV</a>` : ''}
-                <button class="btn btn-small btn-danger" onclick="deleteConfig('${config._id}')">Delete</button>
+                <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); deleteConfig('${config._id}')">Delete</button>
                 <button class="config-copy-btn" onclick="copyClassifierConfigToClipboard('${config._id}', this, event)" title="Copy config info">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
@@ -2887,9 +2513,16 @@ function createHistoryItem(config) {
                 </div>
             ` : ''}
             ${config.ensemble ? renderEmbeddedBaseModelPanels(config) : ''}
-            ${config.features_ranked && Array.isArray(config.features_ranked) && config.features_ranked.length > 0 ? `
+            ${config.model_type !== 'LogisticRegression' && config.features_ranked && Array.isArray(config.features_ranked) && config.features_ranked.length > 0 ? `
                 <div class="rated-features-section" style="margin-top: 15px;">
-                    <h5>Rated Features (by F-Score, ${config.features_ranked.length} total)</h5>
+                    <h5 style="display:flex; align-items:center; gap:6px;">Rated Features (by F-Score, ${config.features_ranked.length} total)
+                        <button type="button" class="config-copy-btn" onclick="event.stopPropagation(); copyRankedFeatures(this)" title="Copy rankings" data-rankings='${JSON.stringify(config.features_ranked).replace(/'/g, "&#39;")}'>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+                                <path d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 4V5" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                        </button>
+                    </h5>
                     <div class="rated-features-list">
                         ${config.features_ranked.map((f) => {
                             const rank = f.rank || 0;
@@ -2908,7 +2541,14 @@ function createHistoryItem(config) {
             ` : ''}
             ${config.features_ranked_by_importance && Array.isArray(config.features_ranked_by_importance) && config.features_ranked_by_importance.length > 0 ? `
                 <div class="rated-features-section" style="margin-top: 15px;">
-                    <h5>Rated Features (by Importance Score, ${config.features_ranked_by_importance.length} total)</h5>
+                    <h5 style="display:flex; align-items:center; gap:6px;">Rated Features (by Importance Score, ${config.features_ranked_by_importance.length} total)
+                        <button type="button" class="config-copy-btn" onclick="event.stopPropagation(); copyRankedFeatures(this)" title="Copy rankings" data-rankings='${JSON.stringify(config.features_ranked_by_importance).replace(/'/g, "&#39;")}'>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+                                <path d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 4V5" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                        </button>
+                    </h5>
                     <div class="rated-features-list">
                         ${config.features_ranked_by_importance.map((f) => {
                             const rank = f.rank || 0;
@@ -2947,12 +2587,7 @@ async function selectConfig(configId) {
         const data = await response.json();
         if (data.success) {
             console.log('Config selected successfully');
-            await loadHistory(); // Reload to show updated selected status
-            // Load the selected config into the form after history is reloaded
-            // Wait a bit to ensure allHistoryConfigs is updated
-            setTimeout(() => {
-                loadConfigIntoForm(configId);
-            }, 100);
+            await loadHistory();
         } else {
             console.error(`Error selecting config: ${data.error}`);
             alert(`Error selecting config: ${data.error}`);
@@ -2963,87 +2598,6 @@ async function selectConfig(configId) {
     }
 }
 
-async function loadConfigIntoForm(configId) {
-    try {
-        const config = allHistoryConfigs.find(c => c._id === configId);
-        if (!config) {
-            console.error('Config not found');
-            alert('Config not found');
-            return;
-        }
-
-        // For ensembles, collect all features from base models
-        let features = config.features || [];
-        if (config.ensemble && config.ensemble_models && config.ensemble_models.length > 0) {
-            const allFeatures = new Set(features);
-            for (const baseModelId of config.ensemble_models) {
-                const baseModel = allHistoryConfigs.find(c => c._id === baseModelId);
-                if (baseModel && baseModel.features && Array.isArray(baseModel.features)) {
-                    for (const f of baseModel.features) {
-                        allFeatures.add(f);
-                    }
-                }
-            }
-            features = Array.from(allFeatures);
-            console.log(`Ensemble: collected ${features.length} features from ${config.ensemble_models.length} base models`);
-
-            // Fill missing time-config fields from first base model
-            const firstBase = allHistoryConfigs.find(c => c._id === config.ensemble_models[0]);
-            if (firstBase) {
-                if (!config.calibration_method) config.calibration_method = firstBase.calibration_method;
-                if (!config.exclude_seasons) config.exclude_seasons = firstBase.exclude_seasons;
-                if (config.min_games_played == null) config.min_games_played = firstBase.min_games_played;
-                if (!config.use_time_calibration && firstBase.use_time_calibration) {
-                    config.use_time_calibration = firstBase.use_time_calibration;
-                    config.begin_year = config.begin_year || firstBase.begin_year;
-                    config.calibration_years = config.calibration_years || firstBase.calibration_years;
-                    config.evaluation_year = config.evaluation_year || firstBase.evaluation_year;
-                }
-            }
-        }
-
-        // For ensembles, resolve model_type to meta-model type and c_value
-        const effectiveModelType = (config.ensemble && config.model_type === 'Ensemble')
-            ? (config.meta_model_type || 'LogisticRegression')
-            : config.model_type;
-        const effectiveCValue = (config.ensemble)
-            ? (config.best_c_value ?? config.meta_c_value ?? null)
-            : (config.best_c_value ?? null);
-
-        // Build config object for form
-        const formConfig = {
-            use_master: (typeof config.use_master !== 'undefined' && config.use_master !== null) ? Boolean(config.use_master) : true,
-            min_games_played: (typeof config.min_games_played !== 'undefined' && config.min_games_played !== null) ? parseInt(config.min_games_played) : 15,
-            model_types: [effectiveModelType],
-            features: features,
-            c_values: effectiveCValue !== null && effectiveCValue !== undefined ? [effectiveCValue] : [],
-            use_time_calibration: config.use_time_calibration || false,
-            calibration_method: config.calibration_method || null,
-            begin_year: config.begin_year || null,
-            calibration_years: config.calibration_years || (config.calibration_year ? [config.calibration_year] : null),
-            evaluation_year: config.evaluation_year || null,
-            exclude_seasons: config.exclude_seasons || null,
-            ensemble: config.ensemble || false,
-            // Note: point_model_id is deprecated - pred_margin should be selected as a regular feature from master CSV
-        };
-
-        setFormData(formConfig);
-        currentConfig = formConfig;
-
-        console.log('Config loaded into form');
-    } catch (error) {
-        console.error(`Error loading config: ${error.message}`);
-        alert(`Error loading config: ${error.message}`);
-    }
-}
-
-// Function to clear missing features display when no config is loaded
-function clearMissingFeaturesDisplay() {
-    const missingFeaturesSection = document.getElementById('missing-features-section');
-    if (missingFeaturesSection) {
-        missingFeaturesSection.style.display = 'none';
-    }
-}
 
 function editConfigName(configId, currentName) {
     const item = document.querySelector(`.history-item[data-config-id="${configId}"]`);
@@ -3253,7 +2807,9 @@ function copyClassifierConfigToClipboard(configId, button, event) {
     }
 
     // Feature rankings by F-Score with Importance scores on the same line
-    if (config.features_ranked && Array.isArray(config.features_ranked) && config.features_ranked.length > 0) {
+    // (skip F-scores for LogisticRegression — they use L1/L2, not univariate selection)
+    const isLR = config.model_type === 'LogisticRegression';
+    if (!isLR && config.features_ranked && Array.isArray(config.features_ranked) && config.features_ranked.length > 0) {
         // Build a lookup map for importance scores by feature name
         const importanceMap = {};
         if (config.features_ranked_by_importance && Array.isArray(config.features_ranked_by_importance)) {
@@ -3303,6 +2859,23 @@ function copyClassifierConfigToClipboard(configId, button, event) {
     });
 }
 
+function copyRankedFeatures(button) {
+    const arr = JSON.parse(button.dataset.rankings || '[]');
+    const text = arr.map(f => {
+        const rank = f.rank || 0;
+        const name = f.name || 'Unknown';
+        const score = f.score !== null && f.score !== undefined
+            ? (typeof f.score === 'number' ? f.score.toFixed(4) : f.score) : '';
+        return score ? `${rank}. ${name} (${score})` : `${rank}. ${name}`;
+    }).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+        button.classList.add('copied');
+        setTimeout(() => button.classList.remove('copied'), 1500);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+    });
+}
+
 // Feature Tree Modal Functions
 function showFeatureTree(configId) {
     const config = allHistoryConfigs.find(c => c._id === configId);
@@ -3328,30 +2901,12 @@ function showFeatureTree(configId) {
     const summary = document.createElement('div');
     summary.className = 'feature-tree-summary';
     summary.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <strong>Total Features:</strong> ${config.features_ranked.length} | 
-                <strong>Score Range:</strong> ${tree.minScore.toFixed(4)} - ${tree.maxScore.toFixed(4)} |
-                <strong>Color:</strong> <span style="background: rgb(34, 197, 94); padding: 2px 8px; border-radius: 3px; color: white;">High</span> → 
-                <span style="background: rgb(234, 179, 8); padding: 2px 8px; border-radius: 3px;">Medium</span> → 
-                <span style="background: rgb(239, 68, 68); padding: 2px 8px; border-radius: 3px; color: white;">Low</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <label for="score-threshold" style="font-weight: bold;">Deselect features below score:</label>
-                <input type="number" 
-                       id="score-threshold" 
-                       step="0.0001" 
-                       min="${tree.minScore.toFixed(4)}" 
-                       max="${tree.maxScore.toFixed(4)}" 
-                       value="${tree.minScore.toFixed(4)}"
-                       style="width: 100px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <button type="button" 
-                        id="deselect-below-threshold-btn" 
-                        class="btn btn-small"
-                        style="padding: 4px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                    Deselect Below Threshold
-                </button>
-            </div>
+        <div>
+            <strong>Total Features:</strong> ${config.features_ranked.length} |
+            <strong>Score Range:</strong> ${tree.minScore.toFixed(4)} - ${tree.maxScore.toFixed(4)} |
+            <strong>Color:</strong> <span style="background: rgb(34, 197, 94); padding: 2px 8px; border-radius: 3px; color: white;">High</span> →
+            <span style="background: rgb(234, 179, 8); padding: 2px 8px; border-radius: 3px;">Medium</span> →
+            <span style="background: rgb(239, 68, 68); padding: 2px 8px; border-radius: 3px; color: white;">Low</span>
         </div>
     `;
     summary.style.marginBottom = '20px';
@@ -3366,58 +2921,11 @@ function showFeatureTree(configId) {
     renderFeatureTree(tree, treeContainer);
     modalContent.appendChild(treeContainer);
     
-    // Add handler for deselect below threshold button (after treeContainer is created)
-    const deselectBtn = document.getElementById('deselect-below-threshold-btn');
-    const thresholdInput = document.getElementById('score-threshold');
-    deselectBtn.addEventListener('click', function() {
-        const threshold = parseFloat(thresholdInput.value);
-        if (isNaN(threshold)) {
-            alert('Please enter a valid threshold value.');
-            return;
-        }
-        deselectFeaturesBelowThreshold(config.features_ranked, threshold, treeContainer);
-    });
-    
-    // Set up listener to sync feature tree items when checkboxes change
-    const syncFeatureTreeItems = () => {
-        treeContainer.querySelectorAll('.feature-list-item').forEach(item => {
-            const featureName = item.dataset.featureName;
-            if (featureName) {
-                updateFeatureItemSelectionState(item, featureName);
-            }
-        });
-    };
-    
-    // Listen for checkbox changes in the form
-    const checkboxes = document.querySelectorAll('input[name="features"]');
-    const syncHandler = () => syncFeatureTreeItems();
-    checkboxes.forEach(cb => {
-        cb.addEventListener('change', syncHandler);
-    });
-    
-    // Store handler for cleanup when modal closes (use property, not dataset, to preserve function reference)
-    modal._syncHandler = syncHandler;
-    modal._syncCheckboxes = Array.from(checkboxes); // Store checkbox references too
-    
     modal.style.display = 'block';
-    
-    // Initial sync
-    syncFeatureTreeItems();
 }
 
 function closeFeatureTreeModal() {
-    const modal = document.getElementById('feature-tree-modal');
-    // Clean up event listeners
-    const syncHandler = modal._syncHandler;
-    const checkboxes = modal._syncCheckboxes;
-    if (syncHandler && checkboxes) {
-        checkboxes.forEach(cb => {
-            cb.removeEventListener('change', syncHandler);
-        });
-        delete modal._syncHandler;
-        delete modal._syncCheckboxes;
-    }
-    modal.style.display = 'none';
+    document.getElementById('feature-tree-modal').style.display = 'none';
 }
 
 // Close modal when clicking outside
@@ -3643,93 +3151,37 @@ function createFeatureListItem(feature, minScore, maxScore) {
     const item = document.createElement('div');
     item.className = 'feature-list-item';
     item.dataset.featureName = feature.name;
-    item.title = `Rank: ${feature.rank || 'N/A'}\nScore: ${feature.score !== null && feature.score !== undefined ? feature.score.toFixed(4) : 'N/A'}\nClick to toggle selection`;
-    
-    // Color based on normalized score: green (high) -> yellow (medium) -> red (low)
+    item.title = `Rank: ${feature.rank || 'N/A'}\nScore: ${feature.score !== null && feature.score !== undefined ? feature.score.toFixed(4) : 'N/A'}`;
+
     const normalized = feature.normalizedScore || 0;
-    
     let red, green, blue;
     if (normalized >= 0.5) {
-        // High to medium: green -> yellow
-        // Green: rgb(34, 197, 94), Yellow: rgb(234, 179, 8)
-        const t = (normalized - 0.5) * 2; // 0 to 1 for upper half
+        const t = (normalized - 0.5) * 2;
         red = Math.round(34 + (234 - 34) * (1 - t));
         green = Math.round(197 + (179 - 197) * (1 - t));
         blue = Math.round(94 + (8 - 94) * (1 - t));
     } else {
-        // Medium to low: yellow -> red
-        // Yellow: rgb(234, 179, 8), Red: rgb(239, 68, 68)
-        const t = normalized * 2; // 0 to 1 for lower half
+        const t = normalized * 2;
         red = Math.round(234 + (239 - 234) * (1 - t));
         green = Math.round(179 + (68 - 179) * (1 - t));
         blue = Math.round(8 + (68 - 8) * (1 - t));
     }
-    
-    // Store original color for opacity toggle
-    item.dataset.originalColor = `rgb(${red}, ${green}, ${blue})`;
-    item.style.backgroundColor = item.dataset.originalColor;
+    item.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
     item.style.color = normalized > 0.6 ? 'white' : 'black';
-    
-    // Check initial selection state
-    updateFeatureItemSelectionState(item, feature.name);
-    
-    // Add click handler to toggle selection
-    item.addEventListener('click', function(e) {
-        e.stopPropagation();
-        toggleFeatureSelection(feature.name, item);
-    });
-    
+
     const nameSpan = document.createElement('span');
     nameSpan.className = 'feature-list-item-name';
     nameSpan.textContent = feature.name;
     item.appendChild(nameSpan);
-    
+
     const scoreSpan = document.createElement('span');
     scoreSpan.className = 'feature-list-item-score';
     scoreSpan.textContent = feature.score !== null && feature.score !== undefined ? feature.score.toFixed(4) : 'N/A';
     item.appendChild(scoreSpan);
-    
+
     return item;
 }
 
-function updateFeatureItemSelectionState(item, featureName) {
-    // Find the corresponding checkbox in the model-config form
-    const checkbox = document.querySelector(`input[name="features"][value="${CSS.escape(featureName)}"]`);
-    const isSelected = checkbox && checkbox.checked;
-    
-    if (isSelected) {
-        item.classList.remove('feature-unselected');
-        item.style.opacity = '1';
-    } else {
-        item.classList.add('feature-unselected');
-        item.style.opacity = '0.5';
-    }
-}
-
-function toggleFeatureSelection(featureName, item) {
-    // Find the corresponding checkbox in the model-config form
-    const checkbox = document.querySelector(`input[name="features"][value="${CSS.escape(featureName)}"]`);
-    
-    if (checkbox) {
-        // Toggle the checkbox
-        checkbox.checked = !checkbox.checked;
-        
-        // Trigger change event to update counts
-        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        // Update visual state
-        updateFeatureItemSelectionState(item, featureName);
-        
-        // Update set checkbox states
-        const setName = checkbox.dataset.set;
-        if (setName) {
-            updateSetCheckboxState(setName);
-        }
-    } else {
-        // Feature not found in form - might be from CSV but not in feature sets
-        console.warn(`Feature "${featureName}" not found in model-config form`);
-    }
-}
 
 function countFeaturesInBranch(node) {
     let count = 0;
@@ -3759,61 +3211,6 @@ function toggleTreeBranch(header) {
     }
 }
 
-function deselectFeaturesBelowThreshold(featuresRanked, threshold, treeContainer) {
-    // Find all features with score below threshold
-    const featuresBelowThreshold = featuresRanked.filter(f => {
-        const score = f.score || 0;
-        return score < threshold;
-    });
-    
-    if (featuresBelowThreshold.length === 0) {
-        alert(`No features found below threshold ${threshold.toFixed(4)}`);
-        return;
-    }
-    
-    // Confirm with user
-    const confirmed = confirm(
-        `This will deselect ${featuresBelowThreshold.length} feature(s) with scores below ${threshold.toFixed(4)}. ` +
-        `Continue?`
-    );
-    
-    if (!confirmed) {
-        return;
-    }
-    
-    let deselectedCount = 0;
-    
-    // Deselect each feature below threshold
-    featuresBelowThreshold.forEach(feature => {
-        const featureName = feature.name;
-        const checkbox = document.querySelector(`input[name="features"][value="${CSS.escape(featureName)}"]`);
-        
-        if (checkbox && checkbox.checked) {
-            checkbox.checked = false;
-            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-            deselectedCount++;
-            
-            // Update visual state in feature tree
-            const treeItem = treeContainer.querySelector(`[data-feature-name="${CSS.escape(featureName)}"]`);
-            if (treeItem) {
-                updateFeatureItemSelectionState(treeItem, featureName);
-            }
-            
-            // Update set checkbox states
-            const setName = checkbox.dataset.set;
-            if (setName) {
-                updateSetCheckboxState(setName);
-            }
-        }
-    });
-    
-    // Show feedback
-    if (deselectedCount > 0) {
-        alert(`Deselected ${deselectedCount} feature(s) below threshold ${threshold.toFixed(4)}`);
-    } else {
-        alert(`All ${featuresBelowThreshold.length} feature(s) below threshold were already deselected.`);
-    }
-}
 
 function createEnsemble() {
     // Get all checked ensemble checkboxes
@@ -3846,7 +3243,8 @@ function createEnsemble() {
             ensemble_meta_features: ensembleMetaFeatures.custom_features,
             ensemble_use_disagree: ensembleMetaFeatures.use_disagree,
             ensemble_use_conf: ensembleMetaFeatures.use_conf,
-            ensemble_use_logit: ensembleMetaFeatures.use_logit
+            ensemble_use_logit: ensembleMetaFeatures.use_logit,
+            name: document.getElementById('ensemble-name').value.trim() || undefined
         })
     })
     .then(response => response.json())
@@ -3977,6 +3375,7 @@ function showEditEnsembleModal(ensembleId) {
     }
 
     // Pre-populate the form
+    document.getElementById('edit-ensemble-name').value = config.name || '';
     document.getElementById('edit-ensemble-use-disagree').checked = config.ensemble_use_disagree || false;
     document.getElementById('edit-ensemble-use-conf').checked = config.ensemble_use_conf || false;
     document.getElementById('edit-ensemble-use-logit').checked = config.ensemble_use_logit || false;
@@ -4042,7 +3441,8 @@ async function submitEditEnsemble() {
                 ensemble_use_disagree: useDisagree,
                 ensemble_use_conf: useConf,
                 ensemble_use_logit: useLogit,
-                meta_model_type: metaModelType
+                meta_model_type: metaModelType,
+                name: document.getElementById('edit-ensemble-name').value.trim() || undefined
             })
         });
 
@@ -4085,6 +3485,12 @@ async function submitEditEnsemble() {
             <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">
                 Modify the meta-model features and retrain. Base model outputs (p_*) are always included.
             </p>
+
+            <!-- Ensemble Name -->
+            <div style="margin-bottom: 15px;">
+                <label style="font-weight: 500; display: block; margin-bottom: 6px;">Ensemble Name:</label>
+                <input type="text" id="edit-ensemble-name" placeholder="Ensemble name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+            </div>
 
             <!-- Meta Model Type -->
             <div style="margin-bottom: 15px;">

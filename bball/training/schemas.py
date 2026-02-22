@@ -52,23 +52,17 @@ class FeatureConfig(BaseModel):
 
     @validator('blocks')
     def validate_blocks(cls, v):
-        """Validate feature block names"""
-        valid_blocks = [
-            'outcome_strength',
-            'shooting_efficiency',
-            'offensive_engine',
-            'defensive_engine',
-            'pace_volatility',
-            'schedule_fatigue',
-            'sample_size',
-            'elo_strength',
-            'era_normalization',
-            'player_talent',
-            'injuries'
-        ]
+        """Validate feature block names against FeatureGroups SSoT."""
+        from bball.features.groups import FeatureGroups
+        valid_blocks = set(FeatureGroups.get_all_groups())
+        # Also accept catch-all groups returned by get_group_for_feature()
+        valid_blocks.update(['other', 'era_normalization'])
         for block in v:
             if block not in valid_blocks:
-                raise ValueError(f"Invalid feature block: {block}. Must be one of {valid_blocks}")
+                raise ValueError(
+                    f"Invalid feature block: {block}. "
+                    f"Must be one of {sorted(valid_blocks)}"
+                )
         return v
 
 

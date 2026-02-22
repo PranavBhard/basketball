@@ -452,16 +452,21 @@ def get_game_market_data(
         return None
 
     def extract_market_data(m: Optional[Dict]) -> Tuple[float, float, float, int, str]:
-        """Extract (last_price, bid, ask, volume, status) from market dict."""
+        """Extract (mid_price, bid, ask, volume, status) from market dict."""
         if not m:
             return (0.0, 0.0, 0.0, 0, "unknown")
         # Prices are in cents (0-100), convert to dollars
-        last_price = m.get("last_price", 0) / 100.0
         yes_bid = m.get("yes_bid", 0) / 100.0
         yes_ask = m.get("yes_ask", 0) / 100.0
+        # Use mid-market price for more accurate live odds;
+        # fall back to last_price if bid/ask unavailable
+        if yes_bid > 0 and yes_ask > 0:
+            mid_price = (yes_bid + yes_ask) / 2.0
+        else:
+            mid_price = m.get("last_price", 0) / 100.0
         volume = m.get("volume", 0)
         status = m.get("status", "unknown")
-        return (last_price, yes_bid, yes_ask, volume, status)
+        return (mid_price, yes_bid, yes_ask, volume, status)
 
     home_price, home_bid, home_ask, home_vol, home_status = extract_market_data(home_market)
     away_price, away_bid, away_ask, away_vol, away_status = extract_market_data(away_market)

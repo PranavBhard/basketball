@@ -16,13 +16,14 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 from bson import ObjectId
 
+from sportscore.services import BaseConfigManager
 from bball.data import ClassifierConfigRepository, PointsConfigRepository
 
 if TYPE_CHECKING:
     from bball.league_config import LeagueConfig
 
 
-class ModelConfigManager:
+class ModelConfigManager(BaseConfigManager):
     """
     Centralized model configuration management using MongoDB.
 
@@ -37,14 +38,16 @@ class ModelConfigManager:
     POINTS_COLLECTION = 'model_config_points_nba'
 
     def __init__(self, db, league: Optional["LeagueConfig"] = None):
-        self.db = db
-        self.league = league
-        # Initialize repositories
-        self._classifier_repo = ClassifierConfigRepository(db, league=league)
+        super().__init__(db, league)
+        # Basketball-specific: points regression repository
         self._points_repo = PointsConfigRepository(db, league=league)
 
+    def _get_classifier_repo(self):
+        """Return the basketball classifier config repository."""
+        return ClassifierConfigRepository(self.db, league=self.league)
+
     # =========================================================================
-    # HASH GENERATION (Single source of truth)
+    # FEATURE SET HASH (for display names)
     # =========================================================================
 
     @staticmethod
@@ -63,70 +66,76 @@ class ModelConfigManager:
         sorted_features = sorted(features)
         return hashlib.md5(','.join(sorted_features).encode()).hexdigest()
 
-    @staticmethod
-    def generate_config_hash(
-        model_type: str,
-        feature_set_hash: str,
-        c_value: float = None,
-        alpha: float = None,
-        use_time_calibration: bool = False,
-        calibration_method: str = None,
-        calibration_years: List[int] = None,
-        begin_year: int = None,
-        evaluation_year: int = None,
-        include_injuries: bool = False,
-        recency_decay_k: float = None,
-        use_master: bool = True,
-        min_games_played: int = 15,
-        target: str = None,  # For points regression
-        exclude_seasons: List[int] = None
-    ) -> str:
-        """
-        Generate unique config hash from parameters.
-
-        This is the SINGLE hash generation method - used by web UI and agents.
-
-        Returns:
-            MD5 hash string
-        """
-        # Build hash string with all relevant fields
-        parts = [
-            f"model_type:{model_type}",
-            f"feature_set_hash:{feature_set_hash}",
-        ]
-
-        # Add optional fields only if set
-        if c_value is not None:
-            parts.append(f"c_value:{c_value}")
-        if alpha is not None:
-            parts.append(f"alpha:{alpha}")
-        if use_time_calibration:
-            parts.append(f"use_time_calibration:{use_time_calibration}")
-        if calibration_method:
-            parts.append(f"calibration_method:{calibration_method}")
-        if calibration_years:
-            parts.append(f"calibration_years:{','.join(map(str, sorted(calibration_years)))}")
-        if begin_year is not None:
-            parts.append(f"begin_year:{begin_year}")
-        if evaluation_year is not None:
-            parts.append(f"evaluation_year:{evaluation_year}")
-        if include_injuries:
-            parts.append(f"include_injuries:{include_injuries}")
-        if recency_decay_k is not None:
-            parts.append(f"recency_decay_k:{recency_decay_k}")
-        parts.append(f"use_master:{use_master}")
-        parts.append(f"min_games_played:{min_games_played}")
-        if exclude_seasons:
-            parts.append(f"exclude_seasons:{','.join(map(str, sorted(exclude_seasons)))}")
-        if target:
-            parts.append(f"target:{target}")
-
-        hash_str = '|'.join(parts)
-        return hashlib.md5(hash_str.encode()).hexdigest()
-
     # =========================================================================
     # CONFIG CREATION (From experiment specs)
     # =========================================================================
+
+    def create_new_config(
+        self,
+        name: str,
+        model_type: str,
+        features: List[str],
+        c_value: float = None,
+        use_time_calibration: bool = False,
+        calibration_method: str = None,
+        begin_year: int = None,
+        calibration_years: List[int] = None,
+        evaluation_year: int = None,
+        min_games_played: int = 15,
+        exclude_seasons: List[int] = None,
+    ) -> Tuple[str, Dict]:
+        """
+        Create a new classifier config. Always inserts (no hash-based upsert).
+
+        Used by the model config page where each config is an explicit document
+        with its own identity, not deduplicated by hash.
+
+        Args:
+            name: User-provided config name (required)
+            model_type: Single model type
+            features: List of feature names
+            c_value: Regularization parameter (for LR/SVM/GB)
+            use_time_calibration: Whether to use time-based calibration
+            calibration_method: 'sigmoid' or 'isotonic'
+            begin_year: Training data start year
+            calibration_years: Years for calibration set
+            evaluation_year: Year for evaluation set
+            min_games_played: Minimum games filter
+            exclude_seasons: Seasons to exclude from training
+
+        Returns:
+            Tuple of (config_id, config_dict)
+        """
+        if calibration_years is None:
+            calibration_years = []
+
+        feature_set_hash = self.generate_feature_set_hash(features)
+
+        config = {
+            'name': name,
+            'model_type': model_type,
+            'features': sorted(features),
+            'feature_count': len(features),
+            'feature_set_hash': feature_set_hash,
+            'best_c_value': c_value,
+            'use_time_calibration': use_time_calibration,
+            'calibration_method': calibration_method,
+            'begin_year': begin_year,
+            'calibration_years': calibration_years,
+            'evaluation_year': evaluation_year,
+            'min_games_played': min_games_played,
+            'exclude_seasons': exclude_seasons,
+            'use_master': True,
+            'ensemble': False,
+            'selected': False,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow(),
+        }
+
+        result = self._classifier_repo.insert_one(config)
+        config_id = str(result.inserted_id)
+        config['_id'] = config_id
+        return config_id, config
 
     def create_classifier_config(
         self,
@@ -152,13 +161,11 @@ class ModelConfigManager:
         point_model_id: str = None,
         # Don't auto-select by default
         selected: bool = False,
-        force_insert: bool = False
     ) -> Tuple[str, Dict]:
         """
         Create a classifier model config.
 
-        This method creates a config document and upserts it by hash.
-        Same config params = same hash = same document (no duplicates).
+        Always inserts a new document.
 
         Args:
             model_type: Model type (LogisticRegression, RandomForest, etc.)
@@ -181,9 +188,6 @@ class ModelConfigManager:
             include_per: Whether PER features included
             point_model_id: Points model reference
             selected: Whether to mark as selected
-            force_insert: If True, always create a new document (skip upsert by hash).
-                         Used by recalibrate_ensemble to avoid overwriting base models
-                         shared with other ensembles.
 
         Returns:
             Tuple of (config_id, config_dict)
@@ -191,31 +195,14 @@ class ModelConfigManager:
         if calibration_years is None:
             calibration_years = [2023]
 
-        # Generate hashes
         feature_set_hash = self.generate_feature_set_hash(features)
-        config_hash = self.generate_config_hash(
-            model_type=model_type,
-            feature_set_hash=feature_set_hash,
-            c_value=c_value,
-            use_time_calibration=use_time_calibration,
-            calibration_method=calibration_method,
-            calibration_years=calibration_years,
-            begin_year=begin_year,
-            evaluation_year=evaluation_year,
-            include_injuries=include_injuries,
-            recency_decay_k=recency_decay_k,
-            use_master=use_master,
-            min_games_played=min_games_played,
-            exclude_seasons=exclude_seasons,
-        )
 
         # Auto-generate name if not provided
         if not name:
-            name = f"{model_type} - {config_hash[:8]}"
+            name = f"{model_type} - {feature_set_hash[:8]}"
 
         # Build config document
         config = {
-            'config_hash': config_hash,
             'model_type': model_type,
             'features': features,
             'feature_count': len(features),
@@ -244,20 +231,11 @@ class ModelConfigManager:
             'updated_at': datetime.utcnow(),
         }
 
-        if force_insert:
-            # Always create a new document (used by recalibrate_ensemble to isolate
-            # base model configs from existing ensembles that share the same hash)
-            import uuid
-            config['config_hash'] = f"{config_hash}_{uuid.uuid4().hex[:8]}"
-            result = self._classifier_repo.insert_one(config)
-            config_id = str(result.inserted_id)
-        else:
-            # Upsert by config_hash using repository
-            self._classifier_repo.upsert_config(config_hash, config)
-            doc = self._classifier_repo.find_by_hash(config_hash)
-            config_id = str(doc['_id'])
+        # Always insert a new document
+        result = self._classifier_repo.insert_one(config)
+        config_id = str(result.inserted_id)
 
-        # Handle selection safely (after upsert)
+        # Handle selection safely (after insert)
         if selected:
             self._safe_select(self.CLASSIFIER_COLLECTION, config_id)
 
@@ -311,26 +289,14 @@ class ModelConfigManager:
         if calibration_years is None:
             calibration_years = [2023]
 
-        # Generate hashes
         feature_set_hash = self.generate_feature_set_hash(features)
-        config_hash = self.generate_config_hash(
-            model_type=model_type,
-            feature_set_hash=feature_set_hash,
-            alpha=alpha,
-            begin_year=begin_year,
-            evaluation_year=evaluation_year,
-            min_games_played=min_games_played,
-            use_master=use_master,
-            target=target
-        )
 
         # Auto-generate name if not provided
         if not name:
-            name = f"{model_type} ({target}) - {config_hash[:8]}"
+            name = f"{model_type} ({target}) - {feature_set_hash[:8]}"
 
         # Build config document
         config = {
-            'config_hash': config_hash,
             'model_type': model_type,
             'target': target,
             'features': features,
@@ -354,12 +320,9 @@ class ModelConfigManager:
             'updated_at': datetime.utcnow(),
         }
 
-        # Upsert by config_hash using repository
-        self._points_repo.upsert_config(config_hash, config)
-
-        # Get config ID
-        doc = self._points_repo.find_by_hash(config_hash)
-        config_id = str(doc['_id'])
+        # Always insert a new document
+        result = self._points_repo.insert_one(config)
+        config_id = str(result.inserted_id)
 
         # Handle selection safely
         if selected:
@@ -536,17 +499,15 @@ class ModelConfigManager:
     # POINTS CONFIG METHODS
     # =========================================================================
 
-    def get_points_config(self, config_id: str = None, config_hash: str = None, selected: bool = False) -> Optional[Dict]:
-        """Get points regression config by ID, hash, or selected flag."""
+    def get_points_config(self, config_id: str = None, selected: bool = False) -> Optional[Dict]:
+        """Get points regression config by ID or selected flag."""
         try:
             if config_id:
                 return self._points_repo.find_by_id(config_id)
-            elif config_hash:
-                return self._points_repo.find_by_hash(config_hash)
             elif selected:
                 return self._points_repo.find_selected()
             else:
-                raise ValueError("Must specify config_id, config_hash, or selected=True")
+                raise ValueError("Must specify config_id or selected=True")
         except Exception as e:
             print(f"Error getting points config: {e}")
             return None
@@ -577,13 +538,12 @@ class ModelConfigManager:
         self._safe_select(self.POINTS_COLLECTION, config_id)
         return True
     
-    def get_config(self, config_id: str = None, config_hash: str = None, selected: bool = False) -> Optional[Dict]:
+    def get_config(self, config_id: str = None, selected: bool = False) -> Optional[Dict]:
         """
-        Get model configuration by ID, hash, or selected flag.
+        Get model configuration by ID or selected flag.
 
         Args:
             config_id: MongoDB _id as string
-            config_hash: Config hash for unique identification
             selected: Get the currently selected config
 
         Returns:
@@ -592,12 +552,10 @@ class ModelConfigManager:
         try:
             if config_id:
                 return self._classifier_repo.find_by_id(config_id)
-            elif config_hash:
-                return self._classifier_repo.find_by_hash(config_hash)
             elif selected:
                 return self._classifier_repo.find_selected()
             else:
-                raise ValueError("Must specify config_id, config_hash, or selected=True")
+                raise ValueError("Must specify config_id or selected=True")
         except Exception as e:
             print(f"Error getting config: {e}")
             return None
@@ -606,6 +564,8 @@ class ModelConfigManager:
         """
         Save or update model configuration.
 
+        If config has '_id', updates by _id. Otherwise inserts a new document.
+
         Args:
             config: Configuration dictionary
 
@@ -613,23 +573,22 @@ class ModelConfigManager:
             MongoDB document _id as string
         """
         try:
-            # Generate config hash if not provided
-            if 'config_hash' not in config:
-                config['config_hash'] = self._generate_config_hash(config)
-
-            # Add timestamps
             config['updated_at'] = datetime.utcnow()
             if 'created_at' not in config:
                 config['created_at'] = datetime.utcnow()
 
-            # Upsert using config_hash as unique identifier
-            self._classifier_repo.upsert_config(config['config_hash'], config)
+            existing_id = config.pop('_id', None)
+            if existing_id:
+                self._classifier_repo.update_one(
+                    {'_id': ObjectId(str(existing_id))},
+                    {'$set': config}
+                )
+                config_id = str(existing_id)
+            else:
+                result = self._classifier_repo.insert_one(config)
+                config_id = str(result.inserted_id)
 
-            # Get document ID
-            doc = self._classifier_repo.find_by_hash(config['config_hash'])
-            config_id = str(doc['_id'])
-
-            print(f"✅ Saved config {config_id[:8]} with hash {config['config_hash'][:8]}")
+            print(f"✅ Saved config {config_id[:8]}")
             return config_id
 
         except Exception as e:
@@ -755,19 +714,7 @@ class ModelConfigManager:
             True if successful
         """
         try:
-            # Get config hash first for deletion
-            config = self._classifier_repo.find_by_id(config_id)
-            if not config:
-                print(f"❌ Config {config_id[:8]} not found")
-                return False
-
-            config_hash = config.get('config_hash')
-            if config_hash:
-                success = self._classifier_repo.delete_config(config_hash)
-            else:
-                # Fallback to direct delete
-                result = self._classifier_repo.delete_one({'_id': ObjectId(config_id)})
-                success = result.deleted_count > 0
+            success = self._classifier_repo.delete_config(config_id)
 
             if success:
                 print(f"✅ Deleted config {config_id[:8]}")
@@ -779,38 +726,6 @@ class ModelConfigManager:
         except Exception as e:
             print(f"Error deleting config: {e}")
             return False
-    
-    def _generate_config_hash(self, config: Dict) -> str:
-        """
-        Generate unique hash for configuration identification.
-        
-        Args:
-            config: Configuration dictionary
-            
-        Returns:
-            MD5 hash string
-        """
-        # Use key fields for hash generation
-        hash_fields = {
-            'model_type': config.get('model_type'),
-            'feature_set_hash': config.get('feature_set_hash'),
-            'best_c_value': config.get('best_c_value'),
-            'use_time_calibration': config.get('use_time_calibration'),
-            'calibration_method': config.get('calibration_method'),
-            'calibration_years': config.get('calibration_years'),
-            'begin_year': config.get('begin_year'),
-            'evaluation_year': config.get('evaluation_year'),
-            'include_injuries': config.get('include_injuries'),
-            'recency_decay_k': config.get('recency_decay_k'),
-            'use_master': config.get('use_master'),
-            'min_games_played': config.get('min_games_played')
-        }
-        
-        # Create deterministic string representation
-        hash_str = '|'.join(f"{k}:{v}" for k, v in sorted(hash_fields.items()) if v is not None)
-        
-        # Generate MD5 hash
-        return hashlib.md5(hash_str.encode()).hexdigest()
     
     @staticmethod
     def create_from_request(request_data: Dict) -> Dict:
