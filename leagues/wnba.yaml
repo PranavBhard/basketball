@@ -2,7 +2,7 @@ meta:
   league_id: wnba
   display_name: WNBA
   sport: basketball
-  logo_url: /static/imgs/wnba-logo.png
+  logo_url: /static/imgs/wnba.png
 
 mongo:
   collections:

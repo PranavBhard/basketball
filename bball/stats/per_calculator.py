@@ -24,6 +24,7 @@ Usage:
     features = calc.get_game_per_features(home_team, away_team, season, game_date)
 """
 
+import math
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -2069,6 +2070,53 @@ class PERCalculator:
                     starters_set = set(starters_list)
                     logger.debug(f"[PER] {team}: {len(starters_set)} starters specified in filter")
 
+        # Usage filter: exclude low-usage players (noisy PER from garbage-time players)
+        # Same thresholds as injury calculator: MPG >= mpg_thresh AND GP >= gp_thresh
+        pf_cfg = {}
+        if self.league:
+            pf_cfg = self.league.raw.get("player_filters", {})
+        mpg_thresh = pf_cfg.get("mpg_thresh", 10)
+        gp_ratio = pf_cfg.get("gp_ratio", 0.15)
+        gp_floor_early = pf_cfg.get("gp_floor_early", 3)
+        gp_floor_late = pf_cfg.get("gp_floor_late", 10)
+        gp_floor_phase_games = pf_cfg.get("gp_floor_phase_games", 20)
+        min_team_games_for_filter = pf_cfg.get("min_team_games_for_filter", 5)
+
+        # Team GP = max games among all players (same heuristic as injury calculator)
+        team_gp = max((p.get('games', 0) for p in players), default=0)
+
+        before_usage = len(players)
+        usage_filtered = []
+        for p in players:
+            games = p.get('games', 0)
+            total_min = p.get('total_min', 0)
+            mpg = total_min / games if games > 0 else 0
+
+            # MPG check
+            if mpg < mpg_thresh:
+                continue
+
+            # GP check (skip if team hasn't played enough games)
+            if team_gp >= min_team_games_for_filter:
+                if team_gp < gp_floor_phase_games:
+                    gp_floor = gp_floor_early
+                    ratio = pf_cfg.get("gp_ratio_early", gp_ratio)
+                else:
+                    gp_floor = gp_floor_late
+                    ratio = pf_cfg.get("gp_ratio_late", gp_ratio)
+                gp_threshold = min(team_gp, max(gp_floor, math.ceil(ratio * team_gp)))
+                if games < gp_threshold:
+                    continue
+
+            usage_filtered.append(p)
+
+        if usage_filtered:
+            players = usage_filtered
+            logger.debug(f"[PER] {team}: {before_usage} -> {len(players)} players after usage filter (mpg>={mpg_thresh})")
+        else:
+            # If ALL players fail the usage filter, keep them all to avoid empty features
+            logger.warning(f"[PER] {team}: All {before_usage} players failed usage filter — keeping all")
+
         # Get league constants
         league_constants = get_league_constants(season, self.db, league=self.league)
         if not league_constants:
@@ -2172,21 +2220,20 @@ class PERCalculator:
                 # Training mode (no player_filters): Use historical heuristic
                 is_starter = player['starter_games'] > player['games'] / 2
             
-            # Calculate minutes per game (MPG) for sorting
-            games_5min = player.get('games_5min', 0)
-            mpg = total_min / games_5min if games_5min > 0 else 0
-            
+            # Calculate minutes per game (MPG) using ALL games with any minutes
+            games_played = player.get('games', 0)
+            mpg = total_min / games_played if games_played > 0 else 0
+
             player_pers.append({
                 'player_id': player['_id'],
                 'player_name': player['player_name'],
                 'games': player['games'],
-                'games_5min': games_5min,  # Games where player played > 5 minutes
                 'total_min': total_min,
                 'avg_min': player['avg_min'],
-                'mpg': mpg,  # Minutes per game (total_min / games_5min)
+                'mpg': mpg,
                 'uper': uper,
                 'aper': aper,
-                'per': per,  # Normalized PER (or aPER if normalization not available)
+                'per': per,
                 'is_starter': is_starter
             })
 
@@ -2206,13 +2253,12 @@ class PERCalculator:
         per_avg = np.mean([p['per'] for p in player_pers]) if player_pers else 0
         
         # Calculate perWeighted using minutes per game (MPG) as weight
-        # MPG = total_min / games_5min (games where player played > 5 minutes)
-        # If games_5min is 0, weight is 0 (MPG already calculated and stored in player dict)
+        # MPG = total_min / games (all games with any minutes)
         weighted_sum = 0.0
         total_mpg = 0.0
         for p in player_pers:
             mpg = p.get('mpg', 0)
-            if mpg > 0:  # Only include players with games_5min > 0 (i.e., played > 5 min in at least one game)
+            if mpg > 0:
                 weighted_sum += p['per'] * mpg
                 total_mpg += mpg
         per_weighted = weighted_sum / total_mpg if total_mpg > 0 else 0

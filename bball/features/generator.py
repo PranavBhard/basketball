@@ -137,6 +137,11 @@ class SharedFeatureGenerator:
             self.per_calculator._preloaded = True
             print(f"[SharedFeatureGenerator] Set per_calculator._preloaded=True, {len(player_stats)} keys")
 
+            # Inject cross-team cache for traded player support in prediction
+            if hasattr(context, 'player_stats_by_player') and context.player_stats_by_player:
+                self.per_calculator._player_stats_by_player = dict(context.player_stats_by_player)
+                print(f"[SharedFeatureGenerator] Set per_calculator._player_stats_by_player, {len(context.player_stats_by_player)} player-season keys")
+
             # CRITICAL: Also build _team_stats_cache from games data for PER calculations
             # Without this, compute_team_per_features falls back to slow DB queries
             from collections import defaultdict

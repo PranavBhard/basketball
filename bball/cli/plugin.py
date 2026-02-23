@@ -156,3 +156,23 @@ class BasketballPlugin(SportPlugin):
             skip_market_calibration=True,
             skip_csv_registration=True,
         )
+
+    # -- Web integration -------------------------------------------------------
+
+    def get_web_blueprint(self):
+        from bball.web.blueprint import bp
+        return bp
+
+    def get_index_view(self):
+        from bball.web.blueprint import index
+        return index
+
+    def get_web_services(self, db, league) -> dict:
+        from bball.web.services import build_services
+        return build_services(db, league)
+
+    def get_nav_items(self, league_id: str) -> list:
+        return [
+            {"label": "Games", "url": f"/{league_id}/", "group": "games"},
+            {"label": "Injuries", "url": f"/{league_id}/injuries-manager", "group": "data_caches"},
+        ]

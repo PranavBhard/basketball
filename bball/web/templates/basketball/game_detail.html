@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ away_team }} @ {{ home_team }}{% endblock %}
+{% block content %}
+<div class="container" style="max-width:900px;margin:auto;padding:20px;">
+  <h2>{{ away_team }} @ {{ home_team }}</h2>
+  <p>Date: {{ game_date }} | Season: {{ season }}</p>
+
+  <div style="display:flex;gap:40px;margin-top:20px;">
+    <!-- Away Team -->
+    <div style="flex:1;">
+      <h3>
+        {% if away_team_logo %}<img src="{{ away_team_logo }}" style="height:24px;vertical-align:middle;"> {% endif %}
+        {{ away_team }}
+      </h3>
+      {% if away_records %}
+      <p style="font-size:0.85em;color:#888;">{{ away_records.overall.record }} | Away: {{ away_records.away.record }} | L10: {{ away_records.last10.record }}</p>
+      {% endif %}
+      <table style="width:100%;font-size:0.85em;border-collapse:collapse;">
+        <tr><th>Player</th><th>Pos</th><th>PPG</th><th>RPG</th><th>APG</th><th>MPG</th></tr>
+        {% for p in away_players %}
+        <tr>
+          <td>{{ p.player_name }}</td>
+          <td>{{ get_position_abbreviation(p.pos_display_name) }}</td>
+          <td>{{ p.stats.ppg }}</td>
+          <td>{{ p.stats.rpg }}</td>
+          <td>{{ p.stats.apg }}</td>
+          <td>{{ p.stats.mpg }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    <!-- Home Team -->
+    <div style="flex:1;">
+      <h3>
+        {% if home_team_logo %}<img src="{{ home_team_logo }}" style="height:24px;vertical-align:middle;"> {% endif %}
+        {{ home_team }}
+      </h3>
+      {% if home_records %}
+      <p style="font-size:0.85em;color:#888;">{{ home_records.overall.record }} | Home: {{ home_records.home.record }} | L10: {{ home_records.last10.record }}</p>
+      {% endif %}
+      <table style="width:100%;font-size:0.85em;border-collapse:collapse;">
+        <tr><th>Player</th><th>Pos</th><th>PPG</th><th>RPG</th><th>APG</th><th>MPG</th></tr>
+        {% for p in home_players %}
+        <tr>
+          <td>{{ p.player_name }}</td>
+          <td>{{ get_position_abbreviation(p.pos_display_name) }}</td>
+          <td>{{ p.stats.ppg }}</td>
+          <td>{{ p.stats.rpg }}</td>
+          <td>{{ p.stats.apg }}</td>
+          <td>{{ p.stats.mpg }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+  {% if last_prediction %}
+  <div style="margin-top:20px;padding:15px;background:#1a1a2e;border-radius:8px;">
+    <h3>Last Prediction</h3>
+    <pre style="font-size:0.85em;">{{ last_prediction | tojson(indent=2) }}</pre>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -537,7 +537,15 @@ class ModelConfigManager(BaseConfigManager):
         """Set a points config as selected."""
         self._safe_select(self.POINTS_COLLECTION, config_id)
         return True
-    
+
+    def deselect_all_points_configs(self) -> bool:
+        """Deselect all points configs."""
+        self._points_repo.update_many(
+            {'selected': True},
+            {'$set': {'selected': False}},
+        )
+        return True
+
     def get_config(self, config_id: str = None, selected: bool = False) -> Optional[Dict]:
         """
         Get model configuration by ID or selected flag.

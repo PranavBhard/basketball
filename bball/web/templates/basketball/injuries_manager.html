@@ -1,0 +1,795 @@
+{% extends "base.html" %}
+
+{% block title %}Injuries Manager{% endblock %}
+
+{% block styles %}
+<style>
+    .injuries-container {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .page-header {
+        margin-bottom: 30px;
+    }
+
+    .page-header h1 {
+        margin-bottom: 10px;
+    }
+
+    .page-header p {
+        color: #666;
+        font-size: 16px;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .stat-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        text-align: center;
+    }
+
+    .stat-card.secondary {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    }
+
+    .stat-card.tertiary {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+
+    .stat-card.quaternary {
+        background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+    }
+
+    .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+
+    .stat-label {
+        font-size: 13px;
+        opacity: 0.9;
+    }
+
+    .section {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 25px;
+    }
+
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .section-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: #333;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-primary {
+        background: #667eea;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #5568d3;
+    }
+
+    .btn-primary:disabled {
+        background: #a0a0a0;
+        cursor: not-allowed;
+    }
+
+    .btn-danger {
+        background: #dc3545;
+        color: white;
+    }
+
+    .btn-danger:hover {
+        background: #c82333;
+    }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #5a6268;
+    }
+
+    .filter-row {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .season-select, .date-input {
+        padding: 10px 15px;
+        border: 2px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        min-width: 150px;
+    }
+
+    .progress-container {
+        display: none;
+        margin-top: 20px;
+    }
+
+    .progress-container.active {
+        display: block;
+    }
+
+    .progress-bar-wrapper {
+        background: #e9ecef;
+        border-radius: 10px;
+        height: 20px;
+        overflow: hidden;
+        margin-bottom: 10px;
+    }
+
+    .progress-bar {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        height: 100%;
+        border-radius: 10px;
+        transition: width 0.3s ease;
+        width: 0%;
+    }
+
+    .progress-text {
+        font-size: 14px;
+        color: #666;
+    }
+
+    .games-table-container {
+        max-height: 600px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+    }
+
+    .games-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .games-table th,
+    .games-table td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+    }
+
+    .games-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .games-table tr:hover {
+        background: #f8f9fa;
+    }
+
+    .date-cell {
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    .team-cell {
+        min-width: 150px;
+    }
+
+    .score-cell {
+        font-weight: 600;
+        text-align: center;
+    }
+
+    .injuries-cell {
+        font-size: 13px;
+    }
+
+    .injury-count {
+        display: inline-block;
+        background: #f8d7da;
+        color: #721c24;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-right: 5px;
+    }
+
+    .injury-count.zero {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .injured-players {
+        color: #666;
+        font-size: 12px;
+        margin-top: 5px;
+    }
+
+    .injured-player-name {
+        display: inline-block;
+        background: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin: 2px;
+        font-size: 11px;
+    }
+
+    .info-text {
+        color: #666;
+        font-size: 14px;
+        margin-top: 15px;
+    }
+
+    .info-text code {
+        background: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 13px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 15px;
+    }
+
+    .meta-info {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 15px;
+        font-size: 14px;
+        color: #666;
+    }
+
+    .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .meta-item strong {
+        color: #333;
+    }
+
+    .alert {
+        padding: 15px 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+
+    .alert-success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .alert-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+
+    .alert-info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+
+    #alertContainer {
+        position: fixed;
+        top: 100px;
+        right: 20px;
+        z-index: 1000;
+        max-width: 400px;
+    }
+
+    .pagination {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 15px;
+    }
+
+    .pagination button {
+        padding: 8px 15px;
+    }
+
+    .winner {
+        font-weight: 700;
+        color: #28a745;
+    }
+
+    .loser {
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="injuries-container">
+    <div class="page-header">
+        <h1>Injuries Manager</h1>
+        <p>View and audit injured player data for historical games. Injured players are computed from roster data and game participation.</p>
+    </div>
+
+    <div id="alertContainer"></div>
+
+    <!-- Statistics Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="totalGames">{{ stats.total_games | default(0) | int }}</div>
+            <div class="stat-label">Total Games</div>
+        </div>
+        <div class="stat-card secondary">
+            <div class="stat-value" id="gamesWithInjuries">{{ stats.games_with_injuries | default(0) | int }}</div>
+            <div class="stat-label">Games with Injuries</div>
+        </div>
+        <div class="stat-card tertiary">
+            <div class="stat-value" id="gamesMissing">{{ stats.games_without_injuries | default(0) | int }}</div>
+            <div class="stat-label">Missing Injury Data</div>
+        </div>
+        <div class="stat-card quaternary">
+            <div class="stat-value" id="coveragePercent">{{ stats.coverage_percent | default(0) }}%</div>
+            <div class="stat-label">Coverage</div>
+        </div>
+    </div>
+
+    <!-- Update Actions -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Injury Data Management</span>
+        </div>
+
+        <div class="filter-row">
+            <select id="seasonSelect" class="season-select">
+                <option value="">All Seasons</option>
+                {% for season in available_seasons %}
+                <option value="{{ season }}">{{ season }}</option>
+                {% endfor %}
+            </select>
+
+            <button class="btn btn-primary" id="runUpdateBtn" onclick="runInjuryUpdate()">
+                Update Injury Data
+            </button>
+
+            <button class="btn btn-secondary" id="refreshBtn" onclick="refreshStats()">
+                Refresh Stats
+            </button>
+
+            <button class="btn btn-danger" id="clearBtn" onclick="clearInjuryData()">
+                Clear Injury Data
+            </button>
+        </div>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar-wrapper">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="progress-text" id="progressText">Starting...</div>
+        </div>
+
+        <div class="meta-info">
+            {% if stats.date_range and stats.date_range.min %}
+            <div class="meta-item">
+                <strong>Date Range:</strong>
+                <span>{{ stats.date_range.min }} to {{ stats.date_range.max }}</span>
+            </div>
+            {% endif %}
+            {% if stats.seasons %}
+            <div class="meta-item">
+                <strong>Seasons:</strong>
+                <span>{{ stats.seasons | join(', ') }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <p class="info-text">
+            <strong>CLI Alternative:</strong> Run <code>python cli/espn_api.py injuries</code> from the command line.
+        </p>
+    </div>
+
+    <!-- Games with Injuries -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Games Injury Audit</span>
+            <div class="filter-row">
+                <select id="auditSeasonSelect" class="season-select" onchange="loadGames()">
+                    <option value="">All Seasons</option>
+                    {% for season in available_seasons %}
+                    <option value="{{ season }}">{{ season }}</option>
+                    {% endfor %}
+                </select>
+                <input type="date" id="auditDateInput" class="date-input" onchange="loadGames()">
+                <button class="btn btn-secondary" onclick="loadGames()">Search</button>
+            </div>
+        </div>
+
+        <div class="games-table-container" id="gamesTableContainer">
+            {% if games %}
+            <table class="games-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Away Team</th>
+                        <th>Score</th>
+                        <th>Home Team</th>
+                        <th>Away Injuries</th>
+                        <th>Home Injuries</th>
+                    </tr>
+                </thead>
+                <tbody id="gamesTableBody">
+                    {% for game in games %}
+                    <tr>
+                        <td class="date-cell">{{ game.date }}</td>
+                        <td class="team-cell {% if not game.homeWon %}winner{% else %}loser{% endif %}">
+                            {{ game.awayTeam.name }}
+                        </td>
+                        <td class="score-cell">
+                            {{ game.awayTeam.points | default('-') }} - {{ game.homeTeam.points | default('-') }}
+                        </td>
+                        <td class="team-cell {% if game.homeWon %}winner{% else %}loser{% endif %}">
+                            {{ game.homeTeam.name }}
+                        </td>
+                        <td class="injuries-cell">
+                            {% set away_injuries = game.awayTeam.injured_players | default([]) %}
+                            <span class="injury-count {% if away_injuries | length == 0 %}zero{% endif %}">
+                                {{ away_injuries | length }}
+                            </span>
+                            {% if away_injuries %}
+                            <div class="injured-players">
+                                {% for pid in away_injuries[:5] %}
+                                <span class="injured-player-name">{{ player_names.get(pid, pid) }}</span>
+                                {% endfor %}
+                                {% if away_injuries | length > 5 %}
+                                <span class="injured-player-name">+{{ away_injuries | length - 5 }} more</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </td>
+                        <td class="injuries-cell">
+                            {% set home_injuries = game.homeTeam.injured_players | default([]) %}
+                            <span class="injury-count {% if home_injuries | length == 0 %}zero{% endif %}">
+                                {{ home_injuries | length }}
+                            </span>
+                            {% if home_injuries %}
+                            <div class="injured-players">
+                                {% for pid in home_injuries[:5] %}
+                                <span class="injured-player-name">{{ player_names.get(pid, pid) }}</span>
+                                {% endfor %}
+                                {% if home_injuries | length > 5 %}
+                                <span class="injured-player-name">+{{ home_injuries | length - 5 }} more</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-state-icon">🏥</div>
+                <p>No games found.</p>
+                <p>Use the filters above to search for games.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="pagination">
+            <button class="btn btn-secondary" id="prevBtn" onclick="prevPage()" disabled>Previous</button>
+            <span id="pageInfo">Page 1</span>
+            <button class="btn btn-secondary" id="nextBtn" onclick="nextPage()">Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let pollInterval = null;
+    let currentPage = 0;
+    const pageSize = 50;
+
+    function showAlert(message, type = 'info') {
+        const alertContainer = document.getElementById('alertContainer');
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type}`;
+        alert.textContent = message;
+        alertContainer.appendChild(alert);
+
+        setTimeout(() => {
+            alert.remove();
+        }, 5000);
+    }
+
+    function updateProgress(percent, text) {
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+
+        progressContainer.classList.add('active');
+        progressBar.style.width = percent + '%';
+        progressText.textContent = text;
+    }
+
+    function hideProgress() {
+        document.getElementById('progressContainer').classList.remove('active');
+    }
+
+    function setButtonsDisabled(disabled) {
+        document.getElementById('runUpdateBtn').disabled = disabled;
+        document.getElementById('clearBtn').disabled = disabled;
+    }
+
+    async function runInjuryUpdate() {
+        const season = document.getElementById('seasonSelect').value;
+
+        setButtonsDisabled(true);
+        updateProgress(0, 'Starting injury data update...');
+
+        try {
+            const response = await fetch('/api/injuries/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({season: season || null})
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                if (data.job_id) {
+                    pollJobStatus(data.job_id);
+                } else {
+                    updateProgress(100, 'Complete!');
+                    showAlert(`Updated ${data.games_updated} games`, 'success');
+                    setTimeout(() => {
+                        hideProgress();
+                        refreshStats();
+                        loadGames();
+                    }, 1000);
+                    setButtonsDisabled(false);
+                }
+            } else {
+                hideProgress();
+                showAlert(data.error || 'Failed to run injury update', 'error');
+                setButtonsDisabled(false);
+            }
+        } catch (error) {
+            hideProgress();
+            showAlert('Error: ' + error.message, 'error');
+            setButtonsDisabled(false);
+        }
+    }
+
+    function pollJobStatus(jobId) {
+        pollInterval = setInterval(async () => {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`);
+                const data = await response.json();
+
+                if (!data.success || !data.job) {
+                    clearInterval(pollInterval);
+                    hideProgress();
+                    showAlert(data.error || 'Failed to get job status', 'error');
+                    setButtonsDisabled(false);
+                    return;
+                }
+
+                const job = data.job;
+
+                if (job.status === 'running') {
+                    updateProgress(job.progress || 0, job.message || 'Processing...');
+                } else if (job.status === 'completed') {
+                    clearInterval(pollInterval);
+                    updateProgress(100, 'Complete!');
+                    showAlert(job.message || 'Injury update completed', 'success');
+                    setTimeout(() => {
+                        hideProgress();
+                        refreshStats();
+                        loadGames();
+                    }, 1000);
+                    setButtonsDisabled(false);
+                } else if (job.status === 'failed') {
+                    clearInterval(pollInterval);
+                    hideProgress();
+                    showAlert(job.error || job.message || 'Job failed', 'error');
+                    setButtonsDisabled(false);
+                }
+            } catch (error) {
+                clearInterval(pollInterval);
+                hideProgress();
+                showAlert('Error polling job status', 'error');
+                setButtonsDisabled(false);
+            }
+        }, 1000);
+    }
+
+    async function clearInjuryData() {
+        const season = document.getElementById('seasonSelect').value;
+        const message = season
+            ? `Are you sure you want to clear injury data for season ${season}?`
+            : 'Are you sure you want to clear ALL injury data?';
+
+        if (!confirm(message)) return;
+
+        try {
+            const response = await fetch('/api/injuries/clear', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({season: season || null})
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showAlert(`Cleared injury data from ${data.cleared} games`, 'success');
+                refreshStats();
+                loadGames();
+            } else {
+                showAlert(data.error || 'Failed to clear injury data', 'error');
+            }
+        } catch (error) {
+            showAlert('Error: ' + error.message, 'error');
+        }
+    }
+
+    async function refreshStats() {
+        try {
+            const response = await fetch('/api/injuries/stats');
+            const stats = await response.json();
+
+            document.getElementById('totalGames').textContent = stats.total_games?.toLocaleString() || '0';
+            document.getElementById('gamesWithInjuries').textContent = stats.games_with_injuries?.toLocaleString() || '0';
+            document.getElementById('gamesMissing').textContent = stats.games_without_injuries?.toLocaleString() || '0';
+            document.getElementById('coveragePercent').textContent = (stats.coverage_percent || 0) + '%';
+
+        } catch (error) {
+            console.error('Error refreshing stats:', error);
+        }
+    }
+
+    async function loadGames() {
+        const season = document.getElementById('auditSeasonSelect').value;
+        const date = document.getElementById('auditDateInput').value;
+
+        try {
+            const params = new URLSearchParams();
+            if (season) params.append('season', season);
+            if (date) params.append('date', date);
+            params.append('limit', pageSize);
+            params.append('offset', currentPage * pageSize);
+
+            const response = await fetch(`/api/injuries/games?${params.toString()}`);
+            const data = await response.json();
+
+            const container = document.getElementById('gamesTableContainer');
+
+            if (data.games && data.games.length > 0) {
+                let html = `
+                    <table class="games-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Away Team</th>
+                                <th>Score</th>
+                                <th>Home Team</th>
+                                <th>Away Injuries</th>
+                                <th>Home Injuries</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                for (const game of data.games) {
+                    const awayInjuries = game.awayTeam?.injured_players || [];
+                    const homeInjuries = game.homeTeam?.injured_players || [];
+                    const awayClass = game.homeWon ? 'loser' : 'winner';
+                    const homeClass = game.homeWon ? 'winner' : 'loser';
+
+                    html += `
+                        <tr>
+                            <td class="date-cell">${game.date}</td>
+                            <td class="team-cell ${awayClass}">${game.awayTeam?.name || '-'}</td>
+                            <td class="score-cell">${game.awayTeam?.points || '-'} - ${game.homeTeam?.points || '-'}</td>
+                            <td class="team-cell ${homeClass}">${game.homeTeam?.name || '-'}</td>
+                            <td class="injuries-cell">
+                                <span class="injury-count ${awayInjuries.length === 0 ? 'zero' : ''}">${awayInjuries.length}</span>
+                                ${awayInjuries.length > 0 ? `<div class="injured-players">${formatPlayerNames(awayInjuries, data.player_names)}</div>` : ''}
+                            </td>
+                            <td class="injuries-cell">
+                                <span class="injury-count ${homeInjuries.length === 0 ? 'zero' : ''}">${homeInjuries.length}</span>
+                                ${homeInjuries.length > 0 ? `<div class="injured-players">${formatPlayerNames(homeInjuries, data.player_names)}</div>` : ''}
+                            </td>
+                        </tr>
+                    `;
+                }
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+
+                // Update pagination
+                document.getElementById('prevBtn').disabled = currentPage === 0;
+                document.getElementById('nextBtn').disabled = data.games.length < pageSize;
+                document.getElementById('pageInfo').textContent = `Page ${currentPage + 1}`;
+
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🏥</div>
+                        <p>No games found.</p>
+                        <p>Use the filters above to search for games.</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading games:', error);
+        }
+    }
+
+    function formatPlayerNames(playerIds, playerNames) {
+        const display = playerIds.slice(0, 5);
+        let html = display.map(pid =>
+            `<span class="injured-player-name">${playerNames[pid] || pid}</span>`
+        ).join('');
+
+        if (playerIds.length > 5) {
+            html += `<span class="injured-player-name">+${playerIds.length - 5} more</span>`;
+        }
+
+        return html;
+    }
+
+    function prevPage() {
+        if (currentPage > 0) {
+            currentPage--;
+            loadGames();
+        }
+    }
+
+    function nextPage() {
+        currentPage++;
+        loadGames();
+    }
+</script>
+{% endblock %}
